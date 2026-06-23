@@ -1,0 +1,7 @@
+library(tidyverse) 
+library(readr)
+dengue <- read_csv("00_Data/Spatial_extract_V1_3.csv")
+head(dengue)
+summary(dengue)
+nat_dis <- read_csv("00_Data/nat_dis_bra.csv")
+summary(nat_dis)
