@@ -78,6 +78,9 @@ disasters_plot <- disasters |>
   filter(date >= min(dengue_adm1$date),
          date <= max(dengue_adm1$date))
 
+#save edited disasers data
+write_csv(disasters_plot, "00_Data/disasters_plot_data.csv")
+
 
 # print disaster groups
 disaster_groups <- sort(unique(disasters_plot$descricao_tipologia))
