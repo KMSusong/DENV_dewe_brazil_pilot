@@ -15,7 +15,7 @@
 adm2_outbreak <-read_csv("00_Data/adm2_outbreak_data.csv")
 climate_monthly <- read_csv("00_Data/climate_monthly.csv")
 merged <- read_csv("00_Data/merged_week_month.csv")
-
+disasters_plot <- read_csv("00_Data/disasters_plot_data.csv")
 #extract outbreak collumns 
 outbreak_flags <- adm2_outbreak |>
   mutate(IBGE_code = as.character(IBGE_code)) |>
@@ -125,15 +125,15 @@ if (exists("climate_monthly")) {
     ) |>
     group_by(IBGE_code) |>
     mutate(
-      pr_lag1   = lag(pr,   1),
-      pr_lag2   = lag(pr,   2),
-      pr_lag3   = lag(pr,   3),
-      tmax_lag1 = lag(tmax, 1),
-      tmax_lag2 = lag(tmax, 2),
-      tmax_lag3 = lag(tmax, 3),
-      tmin_lag1 = lag(tmin, 1),
-      tmin_lag2 = lag(tmin, 2),
-      tmin_lag3 = lag(tmin, 3)
+      pr_lag1   = lag(pr_sum,   1),
+      pr_lag2   = lag(pr_sum,   2),
+      pr_lag3   = lag(pr_sum,   3),
+      tmax_lag1 = lag(tmax_mean, 1),
+      tmax_lag2 = lag(tmax_mean, 2),
+      tmax_lag3 = lag(tmax_mean, 3),
+      tmin_lag1 = lag(tmin_mean, 1),
+      tmin_lag2 = lag(tmin_mean, 2),
+      tmin_lag3 = lag(tmin_mean, 3)
     ) |>
     ungroup()
 }
@@ -197,7 +197,7 @@ ggplot(regression_data |> filter(!is.na(sd_anomaly)),
 
 
 ######-------Save Data
-write_csv(regression_data, "00_Data/regression_data.csv")
-cat("\nSaved: 00_Data/regression_data.csv\n")
+write_csv(regression_data, "00_Data/regression_data_v2.csv")
+cat("\nSaved: 00_Data/regression_data_v2.csv\n")
 
 

@@ -46,7 +46,7 @@ ibge_codes <- merged |>
 
 #set date range
 date_start <- as.Date("2001-01-01")  
-date_end   <- as.Date("2020-07-31") 
+date_end   <- as.Date("2023-12-31") 
 
 
 download.file(
@@ -63,7 +63,7 @@ download.file(
 )
 
 #check var names
-open_dataset("00_Data/climate/tmin.parquet") |>
+open_dataset("00_Data/climate/total_precipitation_sum.parquet") |>
   distinct(name) |>
   collect()
 
@@ -74,7 +74,7 @@ fetch_parquet <- function(file_path, indicator_name,
   open_dataset(file_path) |>
     filter(
       code_muni %in% codes,
-      name == "Tmin_mean",
+      name == "2m_temperature_max_mean",
       date >= d_start,
       date <= d_end
     ) |>
@@ -86,15 +86,15 @@ fetch_parquet <- function(file_path, indicator_name,
 }
 
 cat("Reading tmax...\n")
-tmax_raw <- fetch_parquet("00_Data/climate/tmax.parquet", "tmax",
+tmax_raw <- fetch_parquet("00_Data/climate/2m_temperature_max.parquet", "2m_temperature_max_mean",
                           ibge_codes, date_start, date_end)
 
 cat("Reading tmin...\n")
-tmin_raw <- fetch_parquet("00_Data/climate/tmin.parquet", "tmin",
+tmin_raw <- fetch_parquet("00_Data/climate/2m_temperature_min.parquet", "2m_temperature_min_mean",
                           ibge_codes, date_start, date_end)
 
 cat("Reading precipitation...\n")
-pr_raw   <- fetch_parquet("00_Data/climate/pr.parquet",   "pr",
+pr_raw   <- fetch_parquet("00_Data/climate/total_precipitation_sum.parquet",   "total_precipitation_sum_sum",
                           ibge_codes, date_start, date_end)
 
 
@@ -112,16 +112,21 @@ aggregate_to_monthly <- function(df, value_col, fun = mean) {
     )
 }
 
-tmax_monthly <- aggregate_to_monthly(tmax_raw, "tmax", mean)
-tmin_monthly <- aggregate_to_monthly(tmin_raw, "tmin", mean)
-pr_monthly   <- aggregate_to_monthly(pr_raw,   "pr",   sum)   # sum precip
+tmax_monthly <- aggregate_to_monthly(tmax_raw, "2m_temperature_max_mean", mean)
+tmin_monthly <- aggregate_to_monthly(tmin_raw, "2m_temperature_min_mean", mean)
+pr_monthly   <- aggregate_to_monthly(pr_raw,   "total_precipitation_sum_sum",   sum)   # sum precip
 
 # Combine into one table
 climate_monthly <- tmax_monthly |>
   left_join(tmin_monthly, by = c("IBGE_code", "join_year", "join_month")) |>
-  left_join(pr_monthly,   by = c("IBGE_code", "join_year", "join_month")) |>
-  mutate(temp_range = tmax - tmin)
+  left_join(pr_monthly,   by = c("IBGE_code", "join_year", "join_month")) 
 
+climate_monthly <- climate_monthly |>
+  rename(
+    tmin_mean = "2m_temperature_min_mean" ,
+    tmax_mean = "2m_temperature_max_mean",
+    pr_sum = total_precipitation_sum_sum
+  )
 # Save
 write_csv(climate_monthly, "00_Data/climate_monthly.csv")
 
@@ -134,25 +139,25 @@ adm2_outbreak_climate <- adm2_outbreak |>
   arrange(IBGE_code, join_year, join_month) |>
   group_by(IBGE_code) |>
   mutate(
-    pr_lag1   = lag(pr,   1),
-    pr_lag2   = lag(pr,   2),
-    pr_lag3   = lag(pr,   3),
-    tmax_lag1 = lag(tmax, 1),
-    tmax_lag2 = lag(tmax, 2),
-    tmax_lag3 = lag(tmax, 3),
-    tmin_lag1 = lag(tmin, 1),
-    tmin_lag2 = lag(tmin, 2),
-    tmin_lag3 = lag(tmin, 3)
+    pr_lag1   = lag(pr_sum,   1),
+    pr_lag2   = lag(pr_sum,   2),
+    pr_lag3   = lag(pr_sum,   3),
+    tmax_lag1 = lag(tmax_mean, 1),
+    tmax_lag2 = lag(tmax_mean, 2),
+    tmax_lag3 = lag(tmax_mean, 3),
+    tmin_lag1 = lag(tmin_mean, 1),
+    tmin_lag2 = lag(tmin_mean, 2),
+    tmin_lag3 = lag(tmin_mean, 3)
   ) |>
   ungroup()
 
 # Quick checks
-cat("Rows with climate data:", sum(!is.na(adm2_outbreak_climate$tmax)), "\n")
-cat("Rows without:          ", sum( is.na(adm2_outbreak_climate$tmax)), "\n")
+cat("Rows with climate data:", sum(!is.na(adm2_outbreak_climate$tmax_mean)), "\n")
+cat("Rows without:          ", sum( is.na(adm2_outbreak_climate$tmax_mean)), "\n")
 
-summary(climate_monthly$tmax)
-summary(climate_monthly$tmin)
-summary(climate_monthly$pr)
+summary(climate_monthly$tmax_mean)
+summary(climate_monthly$tmin_mean)
+summary(climate_monthly$pr_sum)
 
 
 #save merged climate/outbreak data
