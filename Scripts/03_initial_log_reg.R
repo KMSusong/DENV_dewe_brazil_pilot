@@ -638,6 +638,7 @@ m2_lmer <- lmer(sd_anomaly ~ n_inunda_lag1 + sd_anomaly_mean3
                 REML   = FALSE)
 
 model_performance(m2_lmer)
+performance(m2_lmer)
 lrtest(m1_lmer, m2_lmer)
 AIC(m0_lmer, m2_lmer)
 log_model("m2", "sd_anomaly_mean3", m2_lmer, m1_lmer, kept = TRUE)
@@ -1028,8 +1029,10 @@ model_performance(final_lmer)
 # Coefficients (interpreted as change in SDs from mean, not odds ratios)
 fixef(final_lmer)
 confint(final_lmer, method = "Wald")
-broom.mixed::tidy(final_lmer, effects = "fixed", exponentiate = FALSE,
-                  conf.int = TRUE)
+broom.mixed::tidy(final_lmer,effects = "fixed",  exponentiate = FALSE,
+                  conf.int = F, p.value = T)
+broom.mixed::tidy(m2_lmer)
+summary(m1_lmer)
 # Check residuals
 plot(final_lmer)                      # residuals vs fitted
 qqnorm(resid(final_lmer))             # normality of residuals
