@@ -11,7 +11,7 @@
 #' Timeline: 
 #'   2026-07-06 
 
-
+library(tidyverse)
 adm2_outbreak <-read_csv("00_Data/adm2_outbreak_data.csv")
 climate_monthly <- read_csv("00_Data/climate_monthly.csv")
 merged <- read_csv("00_Data/merged_week_month.csv")
@@ -170,7 +170,8 @@ cat("  To:  ", as.character(max(regression_data$calendar_start_date, na.rm = TRU
 cat("  Rows:", nrow(regression_data), "\n")
 
 
-#make a standard deviation anomaly var
+
+#make a standard deviation anomaly var 
 regression_data <- regression_data |>
   mutate(
     # Standard deviation anomaly: how many SDs above/below the 5yr mean
@@ -197,7 +198,7 @@ ggplot(regression_data |> filter(!is.na(sd_anomaly)),
 
 
 ######-------Save Data
-write_csv(regression_data, "00_Data/regression_data_v2.csv")
-cat("\nSaved: 00_Data/regression_data_v2.csv\n")
+write_csv(regression_data, "00_Data/regression_data_v4.csv")
+cat("\nSaved: 00_Data/regression_data_v4.csv\n")
 
 

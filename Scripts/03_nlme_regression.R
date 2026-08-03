@@ -124,10 +124,15 @@ ggplot(aug, aes(date, .resid)) +
 ####lme model#####
 m2 <- lme(sd_anomaly ~ n_inunda_lag1, random = ~ 1| adm_1_name, 
           data= model_data)
+m2 <- lme(sd_anomaly ~ priv_pub_lag1, random = ~ 1| adm_1_name, 
+          data= model_data)
+
 m2 <- lme(sd_anomaly ~ n_inunda_lag1,
           random  = ~ 1 | adm_1_name,
           data    = model_data,
           control = lmeControl(opt = "optim"))
+
+check_model(m2)
 
 model_data <- model_data |>
   mutate(n_inunda_lag1_scaled = scale(n_inunda_lag1))
@@ -136,9 +141,13 @@ m2 <- lme(sd_anomaly ~ n_inunda_lag1_scaled,
           random = ~ 1 | adm_1_name,
           data   = model_data)
 
+
 plot(ACF(m2, resType = "normalized"))
 
-m3 <- lme(sd_anomaly ~ n_inunda_lag1_scaled,
+m3 <- lme(sd_anomaly ~ priv_pub_lag1,
+          random = ~ 1 | adm_1_name, data = model_data, correlation = corAR1())
+
+m3 <- lme(sd_anomaly ~ n_inunda_lag1,
           random = ~ 1 | adm_1_name, data = model_data, correlation = corAR1())
 ###not working so switch back to lmer
 # Add a time index variable

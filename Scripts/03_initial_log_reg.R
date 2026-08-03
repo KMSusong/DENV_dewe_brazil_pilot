@@ -8,9 +8,9 @@
 #'  initial stepwise logistic regression; test for performace
 
 #' Timeline: 
-#'   2026-07-06 
+#'   2026-07-29 change regression data to v3 after anscombe transform 
 #' 
-regression_data_v2 <-read_csv("00_Data/regression_data_v2.csv")
+regression_data_v4 <-read_csv("00_Data/regression_data_v4.csv")
 install.packages("broom.mixed")
 install.packages("lme4")
 install.packages("performance")
@@ -22,7 +22,7 @@ library(tidyr)
 library(lmtest) 
 
 #### ----prepare data ----
-model_data <- regression_data_v2 |>
+model_data <- regression_data_v4 |>
   select(
     # outcome
     outbreak,
@@ -44,8 +44,8 @@ model_data <- regression_data_v2 |>
     flag_water_contam_lag1, flag_water_contam_lag2, flag_water_contam_lag3,
     dh_displaced_lag1, dh_displaced_lag2, dh_displaced_lag3,
     dh_homeless_lag1, dh_homeless_lag2, dh_homeless_lag3,
-    sd_anomaly, sd_prev_5yr, season_month, sd_anomaly_mean3,
-    tmin_lag1, tmax_lag1, pr_lag1
+    sd_anomaly, sd_prev_5yr, sd_anomaly_mean3, season_month,
+    tmin_lag1, tmax_lag1, pr_lag1,
     
   ) |>
   drop_na()
@@ -144,7 +144,8 @@ model_log |> write.table(pipe("pbcopy"), sep = "\t", row.names = FALSE)
 # Save as CSV
 write_csv(model_log, "Results/model_selection_log.csv")
 
-
+#load
+model_log <- read_csv("Results/model_selection_log.csv")
 
 ##---------some functions for comparing models ----
 # Compare performance metrics side-by-side in a table (change names)
@@ -152,15 +153,19 @@ compare_performance(m0,m1, rank = TRUE)
 
 # Check Variance Inflation Factors (VIF)
 # Values above 5 or 10 indicate problematic multicollinearity
-check_collinearity(m0)
+check_collinearity(m0_lmer)
 
 # Checks if your data is overdispersed
-check_overdispersion(m0)
+check_overdispersion(m0_lmer)
 
 # Checks if the random effects variance is safely above zero
 check_singularity(m0)
 
+#checks model fit graphically
+check_model()
 
+#to check colinearity?
+pairs
 
 
 
@@ -606,7 +611,7 @@ m0_lmer <- lmer(sd_anomaly ~ 1 + (1 | adm_1_name),
                 REML   = FALSE)   # use ML not REML for AIC comparison
 perf_m0 <- model_performance(m0_lmer)
 model_log <- bind_rows(model_log, tibble(
-  step             = 22L,
+  step             = 41L,
   model_name       = "m0",
   variable_added   = "null (intercept + random effect)",
   AIC              = round(perf_m0$AIC, 2),
@@ -620,7 +625,7 @@ model_log <- bind_rows(model_log, tibble(
   kept             = TRUE,
   notes            = "baseline"
 ))
-
+print(model_log, n = Inf)
 
 m1_lmer <- lmer(sd_anomaly ~ n_inunda_lag1 + (1 | adm_1_name),
                 data   = model_data,
@@ -1029,9 +1034,9 @@ model_performance(final_lmer)
 # Coefficients (interpreted as change in SDs from mean, not odds ratios)
 fixef(final_lmer)
 confint(final_lmer, method = "Wald")
-broom.mixed::tidy(final_lmer,effects = "fixed",  exponentiate = FALSE,
+broom.mixed::tidy(m1_lmer,effects = "fixed",  exponentiate = FALSE,
                   conf.int = F, p.value = T)
-broom.mixed::tidy(m2_lmer)
+broom.mixed::tidy(m1_lmer)
 summary(m1_lmer)
 # Check residuals
 plot(final_lmer)                      # residuals vs fitted

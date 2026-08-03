@@ -10,10 +10,12 @@
 
 #' Timeline: 
 #'   2026-07-10
+#'   2026-07-29 change to v3 after anscombe transform
+#'   2026-08-03 change to v4 after going back to outbreak exclusion theshold
 #'   
  library(tidyverse)
  library(dplyr)
-regression_data <-read_csv("00_Data/regression_data_v2.csv")
+regression_data <-read_csv("00_Data/regression_data_v4.csv")
 
 
 
@@ -36,4 +38,4 @@ regression_data_season_aligned <- regression_data_season_aligned %>%
   mutate(season_month = factor(season_month, ordered = TRUE))
 
 
-write_csv(regression_data_season_aligned, "00_Data/regression_data_v2.csv")
+write_csv(regression_data_season_aligned, "00_Data/regression_data_v4.csv")

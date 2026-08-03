@@ -14,6 +14,8 @@
 #'   2026-06-20
 #'   2026-06-25 - added mean calculations for different year amounts (7-10)
 #'   2026-07-03 - add calculation for outbreak at admin 2 level
+#'   2026-07-29 - fix rolling window, do anscombe transform instead of 
+#'      minimum threshold
 #'  
 
 library(tidyverse)
@@ -246,6 +248,7 @@ write_csv(dengue_monthly_stats_10, "00_Data/10_year_outbreak_data.csv")
 
 #calc outbreak threshold with 5 year mean using Admin 2 level data:
 #set min case for threshold, 10 for now
+#-edited to exclude current month from rolling mean
 dengue_monthly_stats_adm2 <- merged |>
   filter(!is.na(IBGE_code), !is.na(adm_2_name)) |>
   group_by(IBGE_code, adm_2_name, adm_1_name, sigla_uf, join_year, join_month) |>
@@ -253,21 +256,69 @@ dengue_monthly_stats_adm2 <- merged |>
   arrange(IBGE_code, join_month, join_year) |>
   group_by(IBGE_code, join_month) |>
   mutate(
-    mean_prev_5yr = slide_dbl(dengue_total, mean, .before = 5, .after = 0,
+    mean_prev_5yr = slide_dbl(dengue_total, mean, .before = 5, .after = -1,
                               .complete = TRUE),
-    sd_prev_5yr   = slide_dbl(dengue_total, sd,   .before = 5, .after = 0,
+    sd_prev_5yr   = slide_dbl(dengue_total, sd,   .before = 5, .after = -1,
                               .complete = TRUE),
-    threshold     = mean_prev_5yr + 1.25 * sd_prev_5yr,
-    # Explicitly return NA when threshold cannot be calculated
-    outbreak      = case_when(
-      is.na(threshold)    ~ NA,
-      dengue_total < 10   ~ FALSE,
-      dengue_total > threshold ~ TRUE,
-      TRUE                ~ FALSE
+    # Set threshold to NA if mean or SD is zero or NA
+    threshold     = case_when(
+      is.na(mean_prev_5yr)  ~ NA_real_,
+      is.na(sd_prev_5yr)    ~ NA_real_,
+      mean_prev_5yr == 0    ~ NA_real_,
+      sd_prev_5yr   == 0    ~ NA_real_,
+      TRUE ~ mean_prev_5yr + 1.25 * sd_prev_5yr
+    ),
+    outbreak = case_when(
+      is.na(threshold)           ~ NA,
+      dengue_total < 10          ~ FALSE,
+      dengue_total > threshold   ~ TRUE,
+      TRUE                       ~ FALSE
+    ),
+    # SD anomaly: NA when threshold is NA to avoid Inf
+    sd_anomaly = case_when(
+      is.na(threshold) ~ NA_real_,
+      TRUE             ~ (dengue_total - mean_prev_5yr) / sd_prev_5yr
     )
   ) |>
   ungroup() |>
   mutate(date = as.Date(paste(join_year, join_month, "01", sep = "-")))
+
+# Verify no Inf values remain
+cat("Inf values in sd_anomaly:",
+    sum(is.infinite(dengue_monthly_stats_adm2$sd_anomaly), na.rm = TRUE), "\n")
+cat("NA values in sd_anomaly:",
+    sum(is.na(dengue_monthly_stats_adm2$sd_anomaly), na.rm = TRUE), "\n")
+
+
+####diff version, if want to do anscombe transform
+dengue_monthly_stats_adm2 <- merged |>
+  filter(!is.na(IBGE_code), !is.na(adm_2_name)) |>
+  group_by(IBGE_code, adm_2_name, adm_1_name, sigla_uf, join_year, join_month) |>
+  summarise(dengue_total = sum(dengue_total, na.rm = TRUE), .groups = "drop") |>
+  # Apply Anscombe transform to stabilize variance before calculating threshold
+  mutate(dengue_anscombe = 2 * sqrt(dengue_total + 3/8)) |>
+  arrange(IBGE_code, join_month, join_year) |>
+  group_by(IBGE_code, join_month) |>
+  mutate(
+    # Rolling mean and SD calculated on Anscombe-transformed counts
+    mean_prev_5yr = slide_dbl(dengue_anscombe, mean, .before = 5, .after = -1,
+                              .complete = TRUE),
+    sd_prev_5yr   = slide_dbl(dengue_anscombe, sd,   .before = 5, .after = -1,
+                              .complete = TRUE),
+    # Threshold on transformed scale
+    threshold     = mean_prev_5yr + 1.25 * sd_prev_5yr,
+    # Compare transformed observed value to transformed threshold
+    outbreak      = case_when(
+      is.na(threshold)                ~ NA,
+      dengue_anscombe > threshold     ~ TRUE,
+      TRUE                            ~ FALSE
+    )
+  ) |>
+  ungroup() |>
+  mutate(date = as.Date(paste(join_year, join_month, "01", sep = "-")))
+
+#check new transformed data
+summary(dengue_monthly_stats_adm2$dengue_anscombe)
 
 #check data sparcity:
 dengue_monthly_stats_adm2 |>
@@ -284,7 +335,7 @@ dengue_monthly_stats_adm2 |>
 dengue_monthly_stats_adm2 |>
   group_by(IBGE_code, adm_2_name) |>
   summarise(mean_dengue = mean(dengue_total, na.rm = TRUE), .groups = "drop") |>
-  filter(mean_dengue < 5) |>
+  filter(mean_dengue < 10) |>
   nrow()
 
 
