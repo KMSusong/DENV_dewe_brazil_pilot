@@ -99,10 +99,10 @@ lag_cors_outbreak_urb_flood_5 <- calc_lag_cors_outbreak_5("alaga")
 lag_cors_outbreak_drought_5 <- calc_lag_cors_outbreak_5("seca")
 lag_cors_outbreak_flash_5 <- calc_lag_cors_outbreak_5("enxu")
 
-plot_lag_heatmap(lag_cors_outbreak_floods_5, "Floods(inunda) vs outbreak months (5-year)")
-plot_lag_heatmap(lag_cors_outbreak_urb_flood_5, "Urban Floods(alagam) vs outbreak months (5-year)")
-plot_lag_heatmap(lag_cors_outbreak_movement_5, "Mass movement vs outbreak months (5-year)")
-plot_lag_heatmap(lag_cors_outbreak_drought_5, "Drought vs outbreak months (5-year)")
+plot_lag_heatmap(lag_cors_outbreak_floods_5, "Floods vs outbreak months")
+plot_lag_heatmap(lag_cors_outbreak_urb_flood_5, "Urban floods vs outbreak months")
+plot_lag_heatmap(lag_cors_outbreak_movement_5, "Mass movement vs outbreak months")
+plot_lag_heatmap(lag_cors_outbreak_drought_5, "Drought vs outbreak months")
 plot_lag_heatmap(lag_cors_outbreak_flash_5, "Flash Floods vs outbreak months (5-year)")
 
 
@@ -373,7 +373,7 @@ safe_cor <- function(x, y) {
 cors_adm2_floods  <- calc_lag_cors_adm2("inunda")
 cors_adm2_drought <- calc_lag_cors_adm2("seca")
 cors_adm2_all     <- calc_lag_cors_adm2()
-
+cors_adm2_drought
 # Filter to municipalities with at least 6 months of disaster events
 cors_adm2_floods_filtered <- calc_lag_cors_adm2("inunda", min_months = 6)
 

@@ -333,7 +333,7 @@ dengue_monthly_stats_adm2 |>
 
 # Flag municipalities with very low baselines
 dengue_monthly_stats_adm2 |>
-  group_by(IBGE_code, adm_2_name) |>
+  group_by(IBGE_code, adm_2_name, join_year, join_month) |>
   summarise(mean_dengue = mean(dengue_total, na.rm = TRUE), .groups = "drop") |>
   filter(mean_dengue < 10) |>
   nrow()

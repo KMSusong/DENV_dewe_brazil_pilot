@@ -43,9 +43,9 @@ plot_lag_heatmap <- function(data = lag_cors, title_suffix = "") {
     scale_x_continuous(breaks = unique(data$lag),
                        labels = paste0("Lag ", unique(data$lag))) +
     labs(
-      title    = paste0("Spearman correlation: disaster events vs dengue by state and lag",
+      title    = paste0("Spearman correlation by Brazilian state and lag:",
                         if (title_suffix != "") paste0("\n", title_suffix) else ""),
-      subtitle = "States ordered by peak absolute correlation. Grey = insufficient data.",
+      subtitle = "States ordered by peak absolute correlation.",
       x        = "Lag (months)",
       y        = NULL
     ) +

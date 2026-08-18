@@ -10,14 +10,15 @@
 
 #' Timeline: 
 #'   2026-07-04 
-#' 
+#' 2026-08-04 edit maps to make them publishing ready
 
 install.packages("geobr")
 install.packages("patchwork")
 install.packages("patchwork")
 install.packages("biscale")
 install.packages("cowplot")
-
+install.packages("ggspatial")   # if needed
+install.packages("viridis")
 
 library(tidyverse)
 library(geobr)     # Brazil shapefiles - install.packages("geobr")
@@ -26,7 +27,8 @@ library(ggplot2)
 library(patchwork)
 library(biscale)
 library(cowplot)
-
+library(ggspatial)
+library(viridis)
 
 disasters_plot <- read_csv("00_Data/disasters_plot_data.csv")
 merged <- read_csv("00_Data/merged_week_month.csv")
@@ -90,12 +92,25 @@ cat(sprintf("  From: %s\n", max(min(outbreak_5$date, na.rm = TRUE),
 cat(sprintf("  To:   %s\n", min(max(outbreak_5$date, na.rm = TRUE),
                                 max(disasters_plot$date, na.rm = TRUE))))
 
+#filter outbreak 5 to disaster dates
+outbreak_5_filtered <- outbreak_5 %>%
+  filter(
+    date >= min(disasters_plot$date, na.rm = TRUE),
+    date <= max(disasters_plot$date, na.rm = TRUE)
+  )
+
+outbreak_5_filtered |>
+  summarise(
+    min_date = min(date, na.rm = TRUE),
+    max_date = max(date, na.rm = TRUE),
+    n_years  = n_distinct(join_year)
+  )
 
 #load brazil shapefile
 states_sf <- read_state(year = 2020, showProgress = FALSE)
 
 #outbreak totals by state
-outbreak_totals <- outbreak_5 |>
+outbreak_totals <- outbreak_5_filtered |>
   filter(!is.na(adm_1_name), !is.na(outbreak)) |>
   left_join(
     state_crosswalk |> select(adm_1_name, sigla_uf),
@@ -141,64 +156,153 @@ join_disasters_to_map <- function(search_term) {
     )
 }
 
+#change CRS projection to ESRI:102033 – South America Albers Equal Area
+
+
+map_data <- map_outbreaks |>
+  st_transform(5641)
+
+state_labels <- map_data |>
+  st_point_on_surface()
 
 # --- 5a. Outbreak map ---
-plot_outbreak_map <- function(variable  = "n_outbreak_months",
-                              label    = "Outbreak months") {
+plot_outbreak_map <- function(variable = "n_outbreak_months",
+                              label = "Outbreak months") {
   
-  ggplot(map_outbreaks) +
-    geom_sf(aes(fill = .data[[variable]]), colour = "white", linewidth = 0.3) +
-    scale_fill_gradient(
-      low      = "#ffffcc",
-      high     = "#800026",
-      na.value = "grey80",
-      name     = label,
-      labels   = scales::comma
+  ggplot(map_data) +
+    
+    geom_sf(aes(fill = .data[[variable]]),
+            colour = "grey75",
+            linewidth = 0.2) +
+    
+    geom_sf_text(
+      data = state_labels,
+      aes(label = abbrev_state),
+      size = 2.8,
+      fontface = "bold"
     ) +
-    geom_sf_text(aes(label = abbrev_state), size = 2, colour = "grey20") +
+    
+    scale_fill_viridis_c(
+      option = "C",
+      direction = -1,
+      na.value = "grey90",
+      name = label,
+      labels = scales::comma
+    ) +
+    
+    annotation_scale(
+      location = "bl",
+      width_hint = 0.30,
+      text_cex = 0.8
+    ) +
+    
+    annotation_north_arrow(
+      location = "bl",
+      which_north = "true",
+      style = north_arrow_fancy_orienteering,
+      pad_x = unit(0.4, "cm"),
+      pad_y = unit(1.8, "cm"),
+      height = unit(1, "cm"),
+      width = unit(1, "cm")
+    ) +
+    
     labs(
-      title    = paste0("Dengue outbreak months by state 2001 - 2024"),
-      subtitle = paste0("Outbreak defined as dengue > mean + 1.25 SD ",
-                        "of previous 5-year monthly mean"),
-      
+      title = "Dengue Outbreak Months by Brazilian State (2001–2023)",
+      subtitle = "Outbreak defined as monthly dengue incidence > mean + 1.25 SD of the previous 5-year monthly mean",
+      fill = "Outbreak\nmonths"
     ) +
-    theme_void(base_size = 11) +
+    
+    coord_sf() +
+    
+    theme_minimal(base_size = 12) +
+    
     theme(
-      plot.title    = element_text(face = "bold"),
-      legend.position = "right"
+      panel.grid.major = element_blank(),
+      panel.grid.minor = element_blank(),
+      axis.title = element_blank(),
+      axis.text = element_blank(),
+      axis.ticks = element_blank(),
+      
+      plot.title = element_text(face = "bold", size = 16),
+      plot.subtitle = element_text(size = 11),
+      
+      legend.position = c(0.88, 0.28),
+      legend.background = element_rect(fill = alpha("white", 0.85)),
+      legend.title = element_text(face = "bold")
+      
     )
 }
 
 # --- 5b. Disaster map ---
-plot_disaster_map <- function(search_term, title_label = NULL) {
+plot_disaster_map <- function(search_term,
+                              title_label = NULL) {
   
-  # Use search_term as title if no label provided
-  display_label <- if (!is.null(title_label)) title_label else search_term
+  display_label <- if (!is.null(title_label))
+    title_label else search_term
   
-  map_data <- join_disasters_to_map(search_term)
+  map_data <- join_disasters_to_map(search_term) |>
+    st_transform(5641)
+  
   
   ggplot(map_data) +
-    geom_sf(aes(fill = n_events), colour = "white", linewidth = 0.3) +
-    scale_fill_gradient(
-      low      = "#eff3ff",
-      high     = "#08306b",
-      na.value = "grey80",
-      name     = "Events",
-      labels   = scales::comma
-    ) +
-    geom_sf_text(aes(label = abbrev_state), size = 2, colour = "grey20") +
-    labs(
-      title    = paste0("Brazil natural disaster events by state 2001 - 2023: ", display_label),
-      
     
+    geom_sf(aes(fill = n_events),
+            colour = "grey75",
+            linewidth = 0.2) +
+    
+    geom_sf_text(aes(label = abbrev_state),
+                 size = 2.8,
+                 colour = "black",
+                 fontface = "bold") +
+    
+    scale_fill_viridis_c(
+      option = "D",
+      direction = -1,
+      na.value = "grey90",
+      name = "Events",
+      labels = scales::comma
     ) +
-    theme_void(base_size = 11) +
+    
+    annotation_scale(
+      location = "bl",
+      width_hint = 0.30,
+      text_cex = 0.8
+    ) +
+    
+    annotation_north_arrow(
+      location = "bl",
+      which_north = "true",
+      style = north_arrow_fancy_orienteering,
+      pad_x = unit(0.4, "cm"),
+      pad_y = unit(1.8, "cm"),
+      height = unit(1, "cm"),
+      width = unit(1, "cm")
+    ) +
+    
+    labs(
+      title = paste0("Natural Disaster Events by Brazilian State (2001–2023): ", display_label),
+      fill = "Events"
+    ) +
+    
+    coord_sf() +
+    
+    theme_minimal(base_size = 12) +
+    
     theme(
-      plot.title      = element_text(face = "bold"),
-      legend.position = "right"
+      panel.grid.major = element_blank(),
+      panel.grid.minor = element_blank(),
+      axis.title = element_blank(),
+      axis.text = element_blank(),
+      axis.ticks = element_blank(),
+      
+      plot.title = element_text(face = "bold", size = 16),
+      
+      legend.position = c(0.88, 0.28),
+      legend.background = element_rect(fill = alpha("white", 0.85)),
+      legend.title = element_text(face = "bold"),
+      
     )
 }
-
 
 
 # Individual maps
@@ -216,10 +320,51 @@ ggsave("Dev_Figures/map_pct_outbreaks.png",
        plot_outbreak_map("pct_outbreak", "% months as outbreak"), width = 8, height = 7, dpi = 150)
 ggsave("Dev_Figures/map_outbreaks.png",
        plot_outbreak_map(), width = 8, height = 7, dpi = 150)
+#save publish ready maps
+ggsave(
+  "Submission/OutbreakMap.png",
+  plot_outbreak_map(),
+  width = 8,
+  height = 9,
+  dpi = 300,
+  bg = "white"
+)
 
+ggsave(
+  "Submission/DisasterMap_Drought.png",
+  plot_disaster_map("seca", "Drought"),
+  width = 8,
+  height = 9,
+  dpi = 300,
+  bg = "white"
+)
 
+ggsave(
+  "Submission/DisasterMap_Flood.png",
+  plot_disaster_map("inunda", "Floods"),
+  width = 8,
+  height = 9,
+  dpi = 300,
+  bg = "white"
+)
 
+ggsave(
+  "Submission/DisasterMap_Urb_Flood.png",
+  plot_disaster_map("alaga", "Urban Floods"),
+  width = 8,
+  height = 9,
+  dpi = 300,
+  bg = "white"
+)
 
+ggsave(
+  "Submission/DisasterMap_Mass.png",
+  plot_disaster_map("massa", "Mass Movement"),
+  width = 8,
+  height = 9,
+  dpi = 300,
+  bg = "white"
+)
 
 ######-----Bivariate cloropleth map
 
@@ -246,35 +391,358 @@ bivar_data <- states_sf |>
 #map function
 plot_bivariate_map <- function(search_term,
                                title_label = NULL,
-                               pal         = "DkBlue",
-                               style       = "quantile") {
+                               pal = "DkBlue",
+                               style = "quantile") {
   
-  display_label <- if (!is.null(title_label)) title_label else search_term
+  display_label <- if (!is.null(title_label))
+    title_label else search_term
   
+  ## Build data
   bivar_data <- states_sf |>
-    left_join(outbreak_totals, by = c("abbrev_state" = "sigla_uf")) |>
+    left_join(outbreak_totals,
+              by = c("abbrev_state" = "sigla_uf")) |>
     left_join(
       get_disaster_totals(search_term),
       by = c("abbrev_state" = "sigla_uf")
     ) |>
     rename(n_disasters = n_events) |>
-    mutate(n_disasters       = replace_na(n_disasters, 0),
-           n_outbreak_months = replace_na(n_outbreak_months, 0)) |>
-    bi_class(x = n_disasters, y = n_outbreak_months,
-             style = style, dim = 3)
+    mutate(
+      n_disasters = replace_na(n_disasters, 0),
+      n_outbreak_months = replace_na(n_outbreak_months, 0)
+    ) |>
+    bi_class(
+      x = n_disasters,
+      y = n_outbreak_months,
+      style = style,
+      dim = 3
+    ) |>
+    st_transform(5641)
+  
+  ## Label positions
+  state_labels <- st_point_on_surface(bivar_data)
+  
+  ## Legend
+  legend <- bi_legend(
+    pal = pal,
+    dim = 3,
+    xlab = paste("More", display_label),
+    ylab = "More Outbreaks",
+    size = 6
+  )
+  
+  ## Map
+  map <- ggplot(bivar_data) +
+    
+    geom_sf(
+      aes(fill = bi_class),
+      colour = "grey70",
+      linewidth = 0.2,
+      show.legend = FALSE
+    ) +
+    
+    bi_scale_fill(pal = pal, dim = 3) +
+    
+    geom_sf_text(
+      data = state_labels,
+      aes(label = abbrev_state),
+      size = 2.8,
+      colour = "black",
+      fontface = "bold"
+    ) +
+    
+    annotation_north_arrow(
+      location = "bl",
+      which_north = "true",
+      style = north_arrow_fancy_orienteering,
+      pad_x = unit(0.4, "cm"),
+      pad_y = unit(1.8, "cm"),
+      width = unit(0.9, "cm"),
+      height = unit(0.9, "cm")
+    ) +
+    
+    annotation_scale(
+      location = "bl",
+      width_hint = 0.25,
+      pad_x = unit(0.4, "cm"),
+      pad_y = unit(0.3, "cm"),
+      text_cex = 0.7
+    ) +
+    
+    labs(
+      title = paste0(
+        "Dengue Outbreak Months and ",
+        display_label,
+        " Events\nby Brazilian State (2001–2023)"
+      ) ) +
+    
+    coord_sf() +
+    
+    theme_minimal(base_size = 12) +
+    
+    theme(
+      panel.grid = element_blank(),
+      axis.text = element_blank(),
+      axis.title = element_blank(),
+      axis.ticks = element_blank(),
+      
+      plot.title = element_text(
+        face = "bold",
+        size = 16
+      )
+    ) 
+  
+  ggdraw() +
+    draw_plot(map,
+              x = 0,
+              y = 0,
+              width = 1,
+              height = 1) +
+    draw_plot(
+      legend,
+      x = 0.60,
+      y = 0.05,
+      width = 0.18,
+      height = 0.18
+    )
+}
+
+# Usage:
+plot_bivariate_map("inunda", title_label = "Flooding", pal = "BlueGold")
+plot_bivariate_map("seca",   title_label = "Drought", pal = "BlueGold")
+plot_bivariate_map("massa",  title_label = "Mass Movement", pal = "BlueGold")
+plot_bivariate_map("alaga",  title_label = "Urban Flood", pal = "BlueGold")
+
+
+ggsave("Submission/bivariate_map_urb_flood.png",
+       plot_bivariate_map("alaga",  title_label = "Urban Flooding", pal = "BlueGold"), 
+       width = 10, height = 8, dpi = 300,  bg = "white")
+
+ggsave("Submission/bivariate_map_flood.png",
+       plot_bivariate_map("inunda",  title_label = "Flooding", pal = "BlueGold"), 
+       width = 10, height = 8, dpi = 300,  bg = "white")
+
+ggsave("Submission/bivariate_map_drought.png",
+       plot_bivariate_map("seca",  title_label = "Drought", pal = "BlueGold"), 
+       width = 10, height = 8, dpi = 300,  bg = "white")
+
+ggsave("Submission/bivariate_map_mass.png",
+       plot_bivariate_map("mass",  title_label = "Mass Movement", pal = "BlueGold"), 
+       width = 10, height = 8, dpi = 300, bg = "white")
+
+
+
+
+
+
+
+######----Edit so using regression data----####
+regression_data <-read_csv("00_Data/regression_data_v4.csv")
+
+outbreak_prop_state <- regression_data |>
+  filter(!is.na(outbreak)) |>
+  group_by(adm_1_name, sigla_uf) |>
+  summarise(
+    n_outbreak_months = sum(outbreak,  na.rm = TRUE),
+    n_total_months    = n(),
+    pct_outbreak      = round(100 * n_outbreak_months / n_total_months, 1),
+    .groups = "drop"
+  )
+
+map_outbreak_prop <- states_sf |>
+  left_join(outbreak_prop_state, by = c("abbrev_state" = "sigla_uf"))
+
+##map proportion of outbreak months
+
+p_outbreak_prop <- ggplot(map_outbreak_prop) +
+  geom_sf(
+    aes(fill = pct_outbreak),
+    colour = "white",
+    linewidth = 0.3
+  ) +
+  
+  scale_fill_viridis_c(
+    option   = "magma",
+    direction = -1,
+    na.value = "grey80",
+    name     = "% months\nin outbreak",
+    labels   = scales::label_percent(scale = 1)
+  ) +
+  
+  geom_sf_text(
+    aes(
+      label = paste0(
+        abbrev_state,
+        "\n",
+        pct_outbreak,
+        "%"
+      )
+    ),
+    size = 2,
+    colour = "grey20"
+  ) +
+  
+  # Scale bar
+  annotation_scale(
+    location = "bl",
+    width_hint = 0.25,
+    pad_x = unit(0.3, "cm"),
+    pad_y = unit(0.3, "cm"),
+    text_cex = 0.7,
+    line_width = 0.5
+  ) +
+  
+  # North arrow
+  annotation_north_arrow(
+    location = "bl",
+    which_north = "true",
+    style = north_arrow_fancy_orienteering,
+    pad_x = unit(0.4, "cm"),
+    pad_y = unit(1.8, "cm"),
+    height = unit(1, "cm"),
+    width = unit(1, "cm")
+  ) +
+  
+  labs(
+    title = "Proportion of municipality-months classified as outbreaks by state (2006 - 2023)",
+    subtitle = paste0(
+      "Outbreak defined as dengue > mean + 1.25 SD ",
+      "of preceding 5-year monthly mean (minimum 10 cases)."
+    )
+  ) +
+  
+  theme_void(base_size = 11) +
+  theme(
+    plot.title = element_text(face = "bold"),
+    legend.position = "right"
+  )
+
+
+p_outbreak_prop
+
+###bivariate map
+
+# Recalculate outbreak totals from regression_data
+outbreak_totals_reg <- regression_data |>
+  filter(!is.na(outbreak)) |>
+  group_by(adm_1_name, sigla_uf) |>
+  summarise(
+    n_outbreak_months   = sum(outbreak,      na.rm = TRUE),
+    n_total_months      = n(),
+    pct_outbreak        = round(100 * n_outbreak_months / n_total_months, 1),
+    .groups = "drop"
+  )
+
+# Recalculate disaster totals from regression_data date range
+disaster_date_min <- min(regression_data$calendar_start_date, na.rm = TRUE)
+disaster_date_max <- max(regression_data$calendar_start_date, na.rm = TRUE)
+
+disaster_totals_reg <- disasters_plot |>
+  filter(
+    !is.na(adm_1_name),
+    date >= disaster_date_min,
+    date <= disaster_date_max
+  ) |>
+  left_join(
+    state_crosswalk |> select(adm_1_name, sigla_uf),
+    by = "adm_1_name"
+  ) |>
+  group_by(sigla_uf) |>
+  summarise(n_events = n(), .groups = "drop")
+
+# Updated get_disaster_totals function using regression data date range
+get_disaster_totals_reg <- function(search_term) {
+  disasters_plot |>
+    filter(
+      !is.na(adm_1_name),
+      str_detect(tolower(descricao_tipologia), tolower(search_term)),
+      date >= disaster_date_min,
+      date <= disaster_date_max
+    ) |>
+    left_join(
+      state_crosswalk |> select(adm_1_name, sigla_uf),
+      by = "adm_1_name"
+    ) |>
+    group_by(sigla_uf) |>
+    summarise(n_events = n(), .groups = "drop")
+}
+
+# Updated bivariate map function
+plot_bivariate_map_reg <- function(search_term,
+                                   title_label = NULL,
+                                   pal         = "BlueGold",
+                                   style       = "quantile") {
+  
+  display_label <- if (!is.null(title_label)) title_label else search_term
+  
+  bivar_data <- states_sf |>
+    left_join(
+      outbreak_totals_reg |> select(sigla_uf, n_outbreak_months),
+      by = c("abbrev_state" = "sigla_uf")
+    ) |>
+    left_join(
+      get_disaster_totals_reg(search_term),
+      by = c("abbrev_state" = "sigla_uf")
+    ) |>
+    rename(n_disasters = n_events) |>
+    mutate(
+      n_disasters       = replace_na(n_disasters, 0),
+      n_outbreak_months = replace_na(n_outbreak_months, 0)
+    ) |>
+    bi_class(
+      x     = n_disasters,
+      y     = n_outbreak_months,
+      style = style,
+      dim   = 3
+    )
   
   map <- ggplot(bivar_data) +
-    geom_sf(aes(fill = bi_class), colour = "white", linewidth = 0.3,
-            show.legend = FALSE) +
-    bi_scale_fill(pal = pal, dim = 3) +
-    geom_sf_text(aes(label = abbrev_state), size = 2, colour = "grey20") +
-    labs(
-      title    = paste0("Brazil dengue outbreak months vs ", display_label, " events by state 2001 - 2023"),
-      subtitle = "Colour shows combination of disaster frequency and outbreak frequency",
-      
+    geom_sf(
+      aes(fill = bi_class),
+      colour = "white",
+      linewidth = 0.3,
+      show.legend = FALSE
     ) +
+    bi_scale_fill(pal = pal, dim = 3) +
+    
+    geom_sf_text(
+      aes(label = abbrev_state),
+      size = 2,
+      colour = "grey20"
+    ) +
+    
+    # Scale bar
+    annotation_scale(
+      location = "bl",
+      width_hint = 0.25,
+      pad_x = unit(0.3, "cm"),
+      pad_y = unit(0.3, "cm"),
+      text_cex = 0.7,
+      line_width = 0.5
+    ) +
+    
+    # North arrow
+    annotation_north_arrow(
+      location = "bl",
+      which_north = "true",
+      style = north_arrow_fancy_orienteering,
+      pad_x = unit(0.4, "cm"),
+      pad_y = unit(1.8, "cm"),
+      height = unit(1, "cm"),
+      width = unit(1, "cm")
+    ) +
+    
+    labs(
+      title = paste0(
+        "Dengue outbreaks vs ", display_label,
+        " events by state (2006 – 2023)"
+      ),
+      subtitle = "Color shows combination of disaster frequency and outbreak frequency"
+    ) +
+    
     theme_void(base_size = 11) +
-    theme(plot.title = element_text(face = "bold"))
+    theme(
+      plot.title = element_text(face = "bold")
+    )
   
   legend <- bi_legend(
     pal  = pal,
@@ -285,29 +753,244 @@ plot_bivariate_map <- function(search_term,
   )
   
   ggdraw() +
-    draw_plot(map,    x = 0,    y = 0,    width = 0.8,  height = 1) +
-    draw_plot(legend, x = 0.75, y = 0.05, width = 0.25, height = 0.25)
+    draw_plot(
+      map,
+      x = 0,
+      y = 0,
+      width = 0.8,
+      height = 1
+    ) +
+    draw_plot(
+      legend,
+      x = 0.75,
+      y = 0.05,
+      width = 0.25,
+      height = 0.25
+    )
 }
 
-# Usage:
-plot_bivariate_map("inunda", title_label = "flood", pal = "DkCyan")
-plot_bivariate_map("seca",   title_label = "drought", pal = "DkCyan")
-plot_bivariate_map("massa",  title_label = "mass movement", pal = "DkCyan")
-plot_bivariate_map("alaga",  title_label = "urban Flood", pal = "DkCyan")
+###combining the maps
+plot_bivariate_map_reg <- function(search_term,
+                                   title_label = NULL,
+                                   pal         = "BlueGold",
+                                   style       = "quantile") {
+  
+  display_label <- if (!is.null(title_label)) title_label else search_term
+  
+  bivar_data <- states_sf |>
+    left_join(
+      outbreak_totals_reg |>
+        select(sigla_uf, n_outbreak_months),
+      by = c("abbrev_state" = "sigla_uf")
+    ) |>
+    left_join(
+      get_disaster_totals_reg(search_term),
+      by = c("abbrev_state" = "sigla_uf")
+    ) |>
+    rename(n_disasters = n_events) |>
+    mutate(
+      n_disasters       = replace_na(n_disasters, 0),
+      n_outbreak_months = replace_na(n_outbreak_months, 0)
+    ) |>
+    bi_class(
+      x     = n_disasters,
+      y     = n_outbreak_months,
+      style = style,
+      dim   = 3
+    )
+  
+  ggplot(bivar_data) +
+    geom_sf(
+      aes(fill = bi_class),
+      colour = "white",
+      linewidth = 0.3,
+      show.legend = FALSE
+    ) +
+    
+    bi_scale_fill(
+      pal = pal,
+      dim = 3
+    ) +
+    
+    geom_sf_text(
+      aes(label = abbrev_state),
+      size = 2,
+      colour = "grey20"
+    ) +
+    
+    annotation_scale(
+      location = "bl",
+      width_hint = 0.25,
+      pad_x = unit(0.3, "cm"),
+      pad_y = unit(0.3, "cm"),
+      text_cex = 0.7,
+      line_width = 0.5
+    ) +
+    
+    annotation_north_arrow(
+      location = "bl",
+      which_north = "true",
+      style = north_arrow_fancy_orienteering,
+      pad_x = unit(0.4, "cm"),
+      pad_y = unit(1.8, "cm"),
+      height = unit(1, "cm"),
+      width = unit(1, "cm")
+    ) +
+    
+    labs(
+      title = paste0(
+        "Dengue outbreaks vs ",
+        display_label,
+        " events"
+      )
+    ) +
+    
+    theme_void(base_size = 11) +
+    theme(
+      plot.title = element_text(
+        face = "bold",
+        size = 11
+      ),
+      plot.subtitle = element_text(
+        size = 9
+      ),
+      plot.margin = margin(5, 5, 5, 5)
+    )
+}
+
+p_flood <- plot_bivariate_map_reg(
+  "inunda",
+  title_label = "flood"
+)
+
+p_drought <- plot_bivariate_map_reg(
+  "seca",
+  title_label = "drought"
+)
+
+p_urban_flood <- plot_bivariate_map_reg(
+  "alaga",
+  title_label = "urban flood"
+)
+
+shared_legend <- bi_legend(
+  pal  = "BlueGold",
+  dim  = 3,
+  xlab = "More disaster events",
+  ylab = "More dengue outbreaks",
+  size = 8
+)
+
+combined_maps <- cowplot::plot_grid(
+  p_flood,
+  p_drought,
+  p_urban_flood,
+  ncol = 3,
+  labels = c("A", "B", "C"),
+  label_size = 13,
+  label_fontface = "bold",
+  align = "hv",
+  axis = "tblr"
+)
+
+final_figure <- cowplot::ggdraw() +
+  cowplot::draw_plot(
+    combined_maps,
+    x = 0,
+    y = 0,
+    width = 0.84,
+    height = 1
+  ) +
+  cowplot::draw_plot(
+    shared_legend,
+    x = 0.84,
+    y = 0.32,
+    width = 0.16,
+    height = 0.36
+  )
+
+##label function
+panel_label <- function(label) {
+  ggplot() +
+    annotate(
+      "text",
+      x = 0.5,
+      y = 0.5,
+      label = label,
+      fontface = "bold",
+      size = 5
+    ) +
+    theme_void() +
+    theme(
+      plot.margin = margin(0, 0, 0, 0)
+    )
+}
+
+label_a <- panel_label("A")
+label_b <- panel_label("B")
+label_c <- panel_label("C")
+
+panel_a <- cowplot::plot_grid(
+  label_a,
+  p_flood,
+  ncol = 1,
+  rel_heights = c(0.06, 1)
+)
+
+panel_b <- cowplot::plot_grid(
+  label_b,
+  p_drought,
+  ncol = 1,
+  rel_heights = c(0.06, 1)
+)
+
+panel_c <- cowplot::plot_grid(
+  label_c,
+  p_urban_flood,
+  ncol = 1,
+  rel_heights = c(0.06, 1)
+)
+
+combined_maps <- cowplot::plot_grid(
+  panel_a,
+  panel_b,
+  panel_c,
+  ncol = 3,
+  align = "hv"
+)
+
+final_figure <- cowplot::ggdraw() +
+  cowplot::draw_plot(
+    combined_maps,
+    x = 0,
+    y = 0,
+    width = 0.84,
+    height = 1
+  ) +
+  cowplot::draw_plot(
+    shared_legend,
+    x = 0.84,
+    y = 0.32,
+    width = 0.16,
+    height = 0.36
+  )
+
+final_figure
 
 
-ggsave("Dev_Figures/bivariate_map_urb_flood.png",
-       plot_bivariate_map("alaga",  title_label = "urban flood", pal = "DkCyan"), 
-       width = 10, height = 8, dpi = 150)
+# Outbreak proportion map
+p_outbreak_prop
 
-ggsave("Dev_Figures/bivariate_map_flood.png",
-       plot_bivariate_map("inunda",  title_label = "flood", pal = "DkCyan"), 
-       width = 10, height = 8, dpi = 150)
+# Updated bivariate maps using regression data date range
+plot_bivariate_map_reg("inunda", title_label = "flood")
+plot_bivariate_map_reg("seca",   title_label = "drought")
+plot_bivariate_map_reg("alaga",  title_label = "urban flood")
 
-ggsave("Dev_Figures/bivariate_map_drought.png",
-       plot_bivariate_map("seca",  title_label = "drought", pal = "DkCyan"), 
-       width = 10, height = 8, dpi = 150)
 
-ggsave("Dev_Figures/bivariate_map_mass.png",
-       plot_bivariate_map("mass",  title_label = "mass movement", pal = "DkCyan"), 
-       width = 10, height = 8, dpi = 150)
+# Save
+ggsave("Submission/map_outbreak_proportion_by_state.png",
+       p_outbreak_prop, width = 8, height = 7, dpi = 150)
+
+ggsave("Submission/bivariate_map_combined_reg.png",
+       final_figure,
+       width = 12, height = 6, dpi = 150)

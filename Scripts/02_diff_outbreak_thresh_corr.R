@@ -6,7 +6,8 @@
 
 #' Overview: 
 #'  calculate different outbreak thresholds (1.25, 1.5 and 2 times sd) and compare the
-#'  resulting outbreak correlation with different disaster types
+#'  resulting outbreak correlation with different disaster types at the national
+#'  level
 
 #' Timeline: 
 #'   2026-06-25 

@@ -12,11 +12,13 @@
 #' Timeline: 
 #'   2026-08-03
 
-regression_data_v4 <-read_csv("00_Data/regression_data_v4.csv")
+regression_data <-read_csv("00_Data/regression_data_v4.csv")
 install.packages("broom.mixed")
 install.packages("lme4")
 install.packages("performance")
 install.packages("lmtest")
+install.packages("lmerTest")
+library(tidyverse)
 library(lme4)
 library(performance)
 library(dplyr)
@@ -24,27 +26,94 @@ library(tidyr)
 library(lmtest) 
 library(broom.mixed)
 #### ----prepare data ----
-model_data <- regression_data_v4 |>
+cat("Rows available:", nrow(regression_data), "\n")
+cat("Outbreak months:", sum(regression_data$outbreak), "\n")
+cat("Non-outbreak months:", sum(!regression_data$outbreak), "\n")
+cat("Number of Municipalities included", n_distinct(regression_data$IBGE_code))
+# How many months exceeded the SD threshold but had fewer than 10 cases
+regression_data |>
+  filter(!is.na(threshold)) |>
+  summarise(
+    n_above_threshold        = sum(dengue_total > threshold, na.rm = TRUE),
+    n_above_threshold_lt10   = sum(dengue_total > threshold & 
+                                     dengue_total < 10, na.rm = TRUE),
+    pct_reclassified         = round(100 * n_above_threshold_lt10 / 
+                                       n_above_threshold, 1)
+  )
+#filter to municipalities with full date range (216 months)
+
+regression_data_sum <- regression_data |>
+  left_join(
+    regression_data |>
+      filter(!is.na(outbreak)) |>
+      group_by(IBGE_code, adm_2_name, adm_1_name, sigla_uf) |>
+      summarise(
+        n_outbreak_months     = sum(outbreak, na.rm = TRUE),
+        n_total_months        = n(),
+        pct_outbreak_months   = round(100 * n_outbreak_months / n_total_months, 1),
+        total_cases     = sum(dengue_total,  na.rm = TRUE),
+        mean_cases      = round(mean(dengue_total, na.rm = TRUE), 1),
+        .groups = "drop"
+      ),
+    by = c("IBGE_code", "adm_2_name", "adm_1_name", "sigla_uf")
+  )
+
+regression_data_fil <- regression_data_sum |>
+  filter(n_total_months == 216)
+
+#filter to municipalities in the south and southeastern regions of brazil
+sort(unique(regression_data$adm_1_name))
+south_southeast_states <- c(
+  # South
+  "PARANA",
+  "SANTA CATARINA",
+  "RIO GRANDE DO SUL",
+  # Southeast
+  "SAO PAULO",
+  "RIO DE JANEIRO",
+  "MINAS GERAIS",
+  "ESPIRITO SANTO"
+)
+
+regression_data_south_se <- regression_data |>
+  filter(adm_1_name %in% south_southeast_states)
+
+# Check
+cat("States retained:\n")
+print(sort(unique(regression_data_south_se$adm_1_name)))
+cat("Rows:", nrow(regression_data_south_se), "\n")
+
+regression_data <- regression_data |>
+  mutate(region = case_when(
+    adm_1_name %in% c("PARANA", "SANTA CATARINA",
+                      "RIO GRANDE DO SUL")                          ~ "South",
+    adm_1_name %in% c("SAO PAULO", "RIO DE JANEIRO",
+                      "MINAS GERAIS", "ESPIRITO SANTO")             ~ "Southeast",
+    adm_1_name %in% c("MATO GROSSO", "MATO GROSSO DO SUL",
+                      "GOIAS", "DISTRITO FEDERAL")                  ~ "Central-West",
+    adm_1_name %in% c("BAHIA", "SERGIPE", "ALAGOAS", "PERNAMBUCO",
+                      "PARAIBA", "RIO GRANDE DO NORTE", "CEARA",
+                      "PIAUI", "MARANHAO")                          ~ "Northeast",
+    adm_1_name %in% c("AMAZONAS", "PARA", "RORAIMA", "AMAPA",
+                      "ACRE", "RONDONIA", "TOCANTINS")              ~ "North",
+    TRUE ~ NA_character_
+  ))
+
+#filter to data with all variables to be used
+model_data <- regression_data |>
   select(
     # outcome
-    outbreak,
+    outbreak, join_year, join_month,
     # random effect
     adm_1_name, IBGE_code,
     # fixed effects you plan to test (add chuvas? might remove pre-2013) see merge
     #script for lag names
     n_inunda_lag1, n_inunda_lag2, n_inunda_lag3, n_inunda_lag4, n_inunda_lag5,
     n_seca_lag1, n_seca_lag2, n_seca_lag3, n_seca_lag4, n_seca_lag5,
-    n_enxu_lag1, n_enxu_lag2, n_enxu_lag3,
     n_alaga_lag1, n_alaga_lag2, n_alaga_lag3, n_alaga_lag4, n_alaga_lag5,
-    n_massa_lag1, n_massa_lag2, n_massa_lag3, n_massa_lag4, n_massa_lag5,
     pub_total_lag1, pub_total_lag2, pub_total_lag3,
     priv_total_lag1, priv_total_lag2, priv_total_lag3,
     priv_pub_lag1,  priv_pub_lag2,  priv_pub_lag3,
-    pub_water_lag1,
-    pub_vector_lag1,
-    flag_water_deplete_lag1, flag_water_deplete_lag2, flag_water_deplete_lag3,
-    flag_water_contam_lag1, flag_water_contam_lag2, flag_water_contam_lag3,
-    dh_displaced_lag1, dh_displaced_lag2, dh_displaced_lag3,
     dh_homeless_lag1, dh_homeless_lag2, dh_homeless_lag3,
     sd_anomaly, sd_prev_5yr, sd_anomaly_mean3, season_month,
     tmin_lag1, tmin_lag2, tmin_lag3, tmax_lag1, tmax_lag2, tmax_lag3, pr_lag1,
@@ -56,8 +125,95 @@ model_data <- regression_data_v4 |>
 cat("Rows available for modelling:", nrow(model_data), "\n")
 cat("Outbreak months:", sum(model_data$outbreak), "\n")
 cat("Non-outbreak months:", sum(!model_data$outbreak), "\n")
+cat("Number of Municipalities included", n_distinct(model_data$IBGE_code))
 
+# Regression data date range
+cat("=== Regression data ===\n")
+cat("From:", as.character(min(regression_data$calendar_start_date, na.rm = TRUE)), "\n")
+cat("To:  ", as.character(max(regression_data$calendar_start_date, na.rm = TRUE)), "\n")
+cat("Years:", n_distinct(regression_data$join_year), "\n")
+
+# If calendar_start_date isn't in model_data, reconstruct it from join_year and join_month
+cat("\n=== Model data (from join_year/join_month) ===\n")
+model_data |>
+  summarise(
+    min_date = as.Date(paste(min(join_year), min(join_month[join_year == min(join_year)]), "01", sep = "-")),
+    max_date = as.Date(paste(max(join_year), max(join_month[join_year == max(join_year)]), "01", sep = "-")),
+    n_years  = n_distinct(join_year),
+    years    = paste(sort(unique(join_year)), collapse = ", ")
+  ) |>
+  print()
+
+
+# Check how many rows have complete climate data vs missing
+regression_data |>
+  mutate(has_climate = !is.na(tmin_lag1) & !is.na(tmax_lag2) & !is.na(pr_lag1)) |>
+  summarise(
+    n_total          = n(),
+    n_with_climate   = sum(has_climate),
+    n_missing_climate = sum(!has_climate),
+    pct_with_climate = round(100 * n_with_climate / n_total, 1)
+  )
+
+# Check the actual date range of rows WITH complete climate data
+regression_data |>
+  filter(!is.na(tmin_lag1), !is.na(tmax_lag2), !is.na(pr_lag1)) |>
+  summarise(
+    min_year  = min(join_year),
+    max_year  = max(join_year),
+    min_date  = as.Date(paste(min(join_year), min(join_month[join_year == min(join_year)]), "01", sep = "-")),
+    max_date  = as.Date(paste(max(join_year), max(join_month[join_year == max(join_year)]), "01", sep = "-")),
+    n_rows    = n(),
+    n_municipalities = n_distinct(IBGE_code)
+  )
+
+
+
+  regression_data_2023 <- filter(regression_data, join_year==2022)
+  
 #####---Model Log---#####
+  log_model <- function(model_name,
+                        variable_added,
+                        new_model,
+                        prev_model,
+                        kept  = TRUE,
+                        notes = "") {
+    
+    # Extract performance metrics
+    perf    <- model_performance(new_model)
+    lrt     <- lrtest(prev_model, new_model)
+    
+    new_row <- tibble(
+      step             = nrow(model_log) + 1L,
+      model_name       = model_name,
+      variable_added   = variable_added,
+      AIC              = round(perf$AIC, 2),
+      BIC              = round(perf$BIC, 2),
+      R2_marginal      = round(perf$R2_marginal,    4),
+      R2_conditional   = round(perf$R2_conditional, 4),
+      LRT_chisq        = round(lrt$Chisq[2],        3),
+      LRT_df           = lrt$Df[2],
+      LRT_p            = round(lrt$`Pr(>Chisq)`[2], 4),
+      delta_AIC        = round(perf$AIC - AIC(prev_model), 2),
+      kept             = kept,
+      notes            = notes
+    )
+    
+    # Append to log in global environment
+    model_log <<- bind_rows(model_log, new_row)
+    
+    # Print summary to console
+    cat(sprintf("\n--- %s: %s ---\n", model_name, variable_added))
+    cat(sprintf("  AIC: %.2f  (delta: %.2f)\n", perf$AIC,
+                perf$AIC - AIC(prev_model)))
+    cat(sprintf("  LRT: chi2=%.3f, df=%d, p=%.4f\n",
+                lrt$Chisq[2], lrt$Df[2], lrt$`Pr(>Chisq)`[2]))
+    cat(sprintf("  R2 marginal=%.4f, conditional=%.4f\n",
+                perf$R2_marginal, perf$R2_conditional))
+    cat(sprintf("  Decision: %s\n", if (kept) "KEEP" else "DROP"))
+    if (notes != "") cat(sprintf("  Notes: %s\n", notes))
+  }
+  
 # View in console
 print(model_log, n = Inf)
 
@@ -104,7 +260,7 @@ perf_m0 <- model_performance(m0_lmer)
 print(model_log, n = Inf)
 model_log <- bind_rows(model_log, tibble(
   step             = 41L,
-  model_name       = "m0",
+  model_name       = "reg0",
   variable_added   = "null (intercept + random effect)",
   AIC              = round(perf_m0$AIC, 2),
   BIC              = round(perf_m0$BIC, 2),
@@ -119,7 +275,7 @@ model_log <- bind_rows(model_log, tibble(
 ))
 print(model_log, n = Inf)
 broom.mixed::tidy(m0_lmer)
-
+AIC(m0_lmer)
 m1_lmer <- lmer(sd_anomaly ~ tmin_lag1 + (1 | adm_1_name/IBGE_code),
                 data   = model_data,
                 REML   = FALSE)
@@ -146,7 +302,7 @@ AIC(m1_lmer, m2_lmer)
 
 log_model("m2", "tmin_lag2", m2_lmer, m1_lmer, kept = FALSE)
 
-m3_lmer <- lmer(sd_anomaly ~ tmin_lag1 + tmin_lag3 
+m3_lmer <- lmerTest::lmer(sd_anomaly ~ tmin_lag1 + tmin_lag3 
                 + (1 | adm_1_name/IBGE_code),
                 data   = model_data,
                 REML   = FALSE)
@@ -160,7 +316,8 @@ log_model("m3", "tmin_lag3", m3_lmer, m1_lmer, kept = TRUE)
 
 broom.mixed::tidy(m3_lmer,effects = "fixed",  exponentiate = FALSE,
                   conf.int = T, p.value = T)
-
+#try this to get p-val
+summary(m3_lmer)
 
 ##comparing tmin lags
 m_tmin_lag1 <- lmer(
@@ -185,6 +342,7 @@ AIC(m_tmin_lag1, m_tmin_lag2, m_tmin_lag3)
 tidy(m_tmin_lag1, effects = "fixed")
 tidy(m_tmin_lag2, effects = "fixed")
 tidy(m_tmin_lag3, effects = "fixed")
+
 #--- tmin_lag1 is the best --
 
 #df     AIC
@@ -328,22 +486,23 @@ AIC(m_pr_lag1, m_pr_lag2, m_pr_lag3)
 
 ####final climate models
 #final climate model with multiple lags (same as m7_lmer:
-final_clim_all_lag <- lmer(sd_anomaly ~ tmin_lag1 + tmin_lag3 + tmax_lag1
+final_clim_all_lag <- lmerTest::lmer(sd_anomaly ~ tmin_lag1 + tmin_lag3 + tmax_lag1
                 + tmax_lag2 + pr_lag1
                 + (1 | adm_1_name/IBGE_code),
                 data   = model_data,
                 REML   = FALSE)
 #--final climate model with only one lag per variable
-final_clim <- lmer(sd_anomaly ~ tmin_lag1  + tmax_lag2
+final_clim <- lmerTest::lmer(sd_anomaly ~ tmin_lag1  + tmax_lag2
                     + pr_lag1
                    + (1 | adm_1_name/IBGE_code),
                    data   = model_data,
                    REML   = FALSE)
 
-broom.mixed::tidy(final_clim,effects = "fixed",  exponentiate = FALSE,
+broom.mixed::tidy(final_clim,  exponentiate = FALSE,
                   conf.int = T, p.value = T)
+AIC(final_clim)
 check_collinearity(final_clim)
-log_model("final_clim", "just tmin_lag1, tmax_lag2, pr_lag1", final_clim, m0_lmer, kept = T)
+log_model("reg_final_clim", "just tmin_lag1, tmax_lag2, pr_lag1", final_clim, m0_lmer, kept = T)
 
 ###---Testing Disaster Variables----####
 d1_lmer <- lmer(sd_anomaly ~ n_inunda_lag1
@@ -354,7 +513,7 @@ d1_lmer <- lmer(sd_anomaly ~ n_inunda_lag1
 lrtest(final_clim, d1_lmer)
 AIC(final_clim, d1_lmer)
 
-log_model("d1", "n_inunda_lag1", d1_lmer, final_clim, kept = T)
+log_model("reg_d1", "n_inunda_lag1", d1_lmer, final_clim, kept = T)
 
 d2_lmer <- lmer(sd_anomaly ~ n_inunda_lag1 + n_inunda_lag2
                 + tmin_lag1  + tmax_lag2 + pr_lag1
@@ -366,7 +525,7 @@ AIC(d1_lmer, d2_lmer)
 
 log_model("d2", "n_inunda_lag2", d2_lmer, d1_lmer, kept = F)
 
-d3_lmer <- lmer(sd_anomaly ~ n_inunda_lag1 + n_inunda_lag5
+d3_lmer <- lmer(sd_anomaly ~ n_inunda_lag1 + n_inunda_lag3
                 + tmin_lag1  + tmax_lag2 + pr_lag1
                 + (1 | adm_1_name/IBGE_code),
                 data   = model_data,
@@ -381,7 +540,7 @@ log_model("d3", "n_inunda_lag5", d3_lmer, d1_lmer, kept = F)
 
 ######---inunda lags---####
 
-d1 <- lmer(
+d1 <- lmerTest::lmer(
   sd_anomaly ~ n_inunda_lag1 +
     tmin_lag1 + tmax_lag2 + pr_lag1 +
     (1 | adm_1_name/IBGE_code),
@@ -389,7 +548,7 @@ d1 <- lmer(
   REML = FALSE
 )
 
-d2 <- lmer(
+d2 <- lmerTest::lmer(
   sd_anomaly ~ n_inunda_lag2 +
     tmin_lag1 + tmax_lag2 + pr_lag1 +
     (1 | adm_1_name/IBGE_code),
@@ -397,7 +556,7 @@ d2 <- lmer(
   REML = FALSE
 )
 
-d3 <- lmer(
+d3 <- lmerTest::lmer(
   sd_anomaly ~ n_inunda_lag3 +
     tmin_lag1 + tmax_lag2 + pr_lag1 +
     (1 | adm_1_name/IBGE_code),
@@ -405,7 +564,7 @@ d3 <- lmer(
   REML = FALSE
 )
 
-d4 <- lmer(
+d4 <- lmerTest::lmer(
   sd_anomaly ~ n_inunda_lag4 +
     tmin_lag1 + tmax_lag2 + pr_lag1 +
     (1 | adm_1_name/IBGE_code),
@@ -413,7 +572,7 @@ d4 <- lmer(
   REML = FALSE
 )
 
-d5 <- lmer(
+d5 <- lmerTest::lmer(
   sd_anomaly ~ n_inunda_lag5 +
     tmin_lag1 + tmax_lag2 + pr_lag1 +
     (1 | adm_1_name/IBGE_code),
@@ -423,11 +582,11 @@ d5 <- lmer(
 
 AIC(d1, d2, d3, d4, d5)
 bind_rows(
-  tidy(d1, effects = "fixed") |> dplyr::filter(term == "n_inunda_lag1"),
-  tidy(d2, effects = "fixed") |> dplyr::filter(term == "n_inunda_lag2"),
-  tidy(d3, effects = "fixed") |> dplyr::filter(term == "n_inunda_lag3"),
-  tidy(d4, effects = "fixed") |> dplyr::filter(term == "n_inunda_lag4"),
-  tidy(d5, effects = "fixed") |> dplyr::filter(term == "n_inunda_lag5")
+  tidy(d1, effects = "fixed", conf.int = T, p.value = T) |> dplyr::filter(term == "n_inunda_lag1"),
+  tidy(d2, effects = "fixed",conf.int = T, p.value = T) |> dplyr::filter(term == "n_inunda_lag2"),
+  tidy(d3, effects = "fixed",conf.int = T, p.value = T) |> dplyr::filter(term == "n_inunda_lag3"),
+  tidy(d4, effects = "fixed",conf.int = T, p.value = T) |> dplyr::filter(term == "n_inunda_lag4"),
+  tidy(d5, effects = "fixed",conf.int = T, p.value = T) |> dplyr::filter(term == "n_inunda_lag5")
 )
 
 broom.mixed::tidy(d5,effects = "fixed",  exponentiate = FALSE,
@@ -499,7 +658,7 @@ anova(inunda_lag1234_lmer, inunda_lag12345_lmer)
 
 #######--alaga lags--####
 
-alaga1_lmer <- lmer(
+alaga1_lmer <- lmerTest::lmer(
   sd_anomaly ~ n_alaga_lag1 +
     tmin_lag1 + tmax_lag2 + pr_lag1 +
     (1 | adm_1_name/IBGE_code),
@@ -507,7 +666,7 @@ alaga1_lmer <- lmer(
   REML = FALSE
 )
 
-alaga2_lmer <- lmer(
+alaga2_lmer <- lmerTest::lmer(
   sd_anomaly ~ n_alaga_lag2 +
     tmin_lag1 + tmax_lag2 + pr_lag1 +
     (1 | adm_1_name/IBGE_code),
@@ -515,7 +674,7 @@ alaga2_lmer <- lmer(
   REML = FALSE
 )
 
-alaga3_lmer <- lmer(
+alaga3_lmer <- lmerTest::lmer(
   sd_anomaly ~ n_alaga_lag3 +
     tmin_lag1 + tmax_lag2 + pr_lag1 +
     (1 | adm_1_name/IBGE_code),
@@ -523,7 +682,7 @@ alaga3_lmer <- lmer(
   REML = FALSE
 )
 
-alaga4_lmer <- lmer(
+alaga4_lmer <- lmerTest::lmer(
   sd_anomaly ~ n_alaga_lag4 +
     tmin_lag1 + tmax_lag2 + pr_lag1 +
     (1 | adm_1_name/IBGE_code),
@@ -531,7 +690,7 @@ alaga4_lmer <- lmer(
   REML = FALSE
 )
 
-alaga5_lmer <- lmer(
+alaga5_lmer <- lmerTest::lmer(
   sd_anomaly ~ n_alaga_lag5 +
     tmin_lag1 + tmax_lag2 + pr_lag1 +
     (1 | adm_1_name/IBGE_code),
@@ -541,11 +700,11 @@ alaga5_lmer <- lmer(
 
 AIC(alaga1_lmer, alaga2_lmer, alaga3_lmer, alaga4_lmer, alaga5_lmer)
 alaga_estimates <- bind_rows(
-  tidy(alaga1_lmer, effects = "fixed") %>% filter(term == "n_alaga_lag1"),
-  tidy(alaga2_lmer, effects = "fixed") %>% filter(term == "n_alaga_lag2"),
-  tidy(alaga3_lmer, effects = "fixed") %>% filter(term == "n_alaga_lag3"),
-  tidy(alaga4_lmer, effects = "fixed") %>% filter(term == "n_alaga_lag4"),
-  tidy(alaga5_lmer, effects = "fixed") %>% filter(term == "n_alaga_lag5")
+  tidy(alaga1_lmer, effects = "fixed", conf.int = T, p.value = T) %>% filter(term == "n_alaga_lag1"),
+  tidy(alaga2_lmer, effects = "fixed",conf.int = T, p.value = T) %>% filter(term == "n_alaga_lag2"),
+  tidy(alaga3_lmer, effects = "fixed",conf.int = T, p.value = T) %>% filter(term == "n_alaga_lag3"),
+  tidy(alaga4_lmer, effects = "fixed",conf.int = T, p.value = T) %>% filter(term == "n_alaga_lag4"),
+  tidy(alaga5_lmer, effects = "fixed",conf.int = T, p.value = T) %>% filter(term == "n_alaga_lag5")
 ) %>%
   mutate(lag = 1:5)
 
@@ -555,7 +714,7 @@ alaga_estimates
 
 ######---Seca/drought lags----####
 
-seca1_lmer <- lmer(
+seca1_lmer <- lmerTest::lmer(
   sd_anomaly ~ n_seca_lag1 +
     tmin_lag1 + tmax_lag2 + pr_lag1 +
     (1 | adm_1_name/IBGE_code),
@@ -563,7 +722,7 @@ seca1_lmer <- lmer(
   REML = FALSE
 )
 
-seca2_lmer <- lmer(
+seca2_lmer <- lmerTest::lmer(
   sd_anomaly ~ n_seca_lag2 +
     tmin_lag1 + tmax_lag2 + pr_lag1 +
     (1 | adm_1_name/IBGE_code),
@@ -571,7 +730,7 @@ seca2_lmer <- lmer(
   REML = FALSE
 )
 
-seca3_lmer <- lmer(
+seca3_lmer <- lmerTest::lmer(
   sd_anomaly ~ n_seca_lag3 +
     tmin_lag1 + tmax_lag2 + pr_lag1 +
     (1 | adm_1_name/IBGE_code),
@@ -579,7 +738,7 @@ seca3_lmer <- lmer(
   REML = FALSE
 )
 
-seca4_lmer <- lmer(
+seca4_lmer <- lmerTest::lmer(
   sd_anomaly ~ n_seca_lag4 +
     tmin_lag1 + tmax_lag2 + pr_lag1 +
     (1 | adm_1_name/IBGE_code),
@@ -587,7 +746,7 @@ seca4_lmer <- lmer(
   REML = FALSE
 )
 
-seca5_lmer <- lmer(
+seca5_lmer <- lmerTest::lmer(
   sd_anomaly ~ n_seca_lag5 +
     tmin_lag1 + tmax_lag2 + pr_lag1 +
     (1 | adm_1_name/IBGE_code),
@@ -598,16 +757,17 @@ seca5_lmer <- lmer(
 AIC(seca1_lmer, seca2_lmer, seca3_lmer, seca4_lmer, seca5_lmer)
 
 seca_estimates <- bind_rows(
-  tidy(seca1_lmer, effects = "fixed") %>% filter(term == "n_seca_lag1"),
-  tidy(seca2_lmer, effects = "fixed") %>% filter(term == "n_seca_lag2"),
-  tidy(seca3_lmer, effects = "fixed") %>% filter(term == "n_seca_lag3"),
-  tidy(seca4_lmer, effects = "fixed") %>% filter(term == "n_seca_lag4"),
-  tidy(seca5_lmer, effects = "fixed") %>% filter(term == "n_seca_lag5")
+  tidy(seca1_lmer, effects = "fixed",conf.int = T, p.value = T) %>% filter(term == "n_seca_lag1"),
+  tidy(seca2_lmer, effects = "fixed",conf.int = T, p.value = T) %>% filter(term == "n_seca_lag2"),
+  tidy(seca3_lmer, effects = "fixed",conf.int = T, p.value = T) %>% filter(term == "n_seca_lag3"),
+  tidy(seca4_lmer, effects = "fixed",conf.int = T, p.value = T) %>% filter(term == "n_seca_lag4"),
+  tidy(seca5_lmer, effects = "fixed",conf.int = T, p.value = T) %>% filter(term == "n_seca_lag5")
 ) %>%
   mutate(lag = 1:5)
 
 seca_estimates
-
+broom.mixed::tidy(seca2_lmer,effects = "fixed",  exponentiate = FALSE,
+                  conf.int = T, p.value = T)
 ######--Massa lags----####
 massa1_lmer <- lmer(
   sd_anomaly ~ n_massa_lag1 +
@@ -651,11 +811,11 @@ massa5_lmer <- lmer(
 
 AIC(massa1_lmer, massa2_lmer, massa3_lmer, massa4_lmer, massa5_lmer)
 massa_estimates <- bind_rows(
-  tidy(massa1_lmer, effects = "fixed") %>% filter(term == "n_massa_lag1"),
-  tidy(massa2_lmer, effects = "fixed") %>% filter(term == "n_massa_lag2"),
-  tidy(massa3_lmer, effects = "fixed") %>% filter(term == "n_massa_lag3"),
-  tidy(massa4_lmer, effects = "fixed") %>% filter(term == "n_massa_lag4"),
-  tidy(massa5_lmer, effects = "fixed") %>% filter(term == "n_massa_lag5")
+  tidy(massa1_lmer, effects = "fixed",conf.int = T, p.value = T) %>% filter(term == "n_massa_lag1"),
+  tidy(massa2_lmer, effects = "fixed",conf.int = T, p.value = T) %>% filter(term == "n_massa_lag2"),
+  tidy(massa3_lmer, effects = "fixed",conf.int = T, p.value = T) %>% filter(term == "n_massa_lag3"),
+  tidy(massa4_lmer, effects = "fixed",conf.int = T, p.value = T) %>% filter(term == "n_massa_lag4"),
+  tidy(massa5_lmer, effects = "fixed",conf.int = T, p.value = T) %>% filter(term == "n_massa_lag5")
 ) %>%
   mutate(lag = 1:5)
 
@@ -669,7 +829,7 @@ outbreak_data <- model_data %>%
 table(model_data$outbreak)
 nrow(outbreak_data)
 
-summary(e1_lmer)
+
 broom.mixed::tidy(e1_lmer,effects = "fixed",  exponentiate = FALSE,
                   conf.int = T, p.value = T)
 
@@ -686,9 +846,16 @@ outbreak_data <- outbreak_data %>%
     pub_total_lag2_million = pub_total_lag2 / 1e6,
     pub_total_lag3_million = pub_total_lag3 / 1e6
   )
-
+damage_base_lmer <- lmerTest::lmer(
+  sd_anomaly ~ 
+    tmin_lag1 + tmax_lag2 + pr_lag1 +
+    (1 | adm_1_name/IBGE_code),
+  data = outbreak_data,
+  REML = FALSE
+)
+AIC(damage_base_lmer)
 #######---private public total damage---######
-priv_pub_lag1_lmer <- lmer(
+priv_pub_lag1_lmer <- lmerTest::lmer(
   sd_anomaly ~ priv_pub_lag1_million +
     tmin_lag1 + tmax_lag2 + pr_lag1 +
     (1 | adm_1_name/IBGE_code),
@@ -696,7 +863,7 @@ priv_pub_lag1_lmer <- lmer(
   REML = FALSE
 )
 
-priv_pub_lag2_lmer <- lmer(
+priv_pub_lag2_lmer <- lmerTest::lmer(
   sd_anomaly ~ priv_pub_lag2_million +
     tmin_lag1 + tmax_lag2 + pr_lag1 +
     (1 | adm_1_name/IBGE_code),
@@ -704,7 +871,7 @@ priv_pub_lag2_lmer <- lmer(
   REML = FALSE
 )
 
-priv_pub_lag3_lmer <- lmer(
+priv_pub_lag3_lmer <- lmerTest::lmer(
   sd_anomaly ~ priv_pub_lag3_million +
     tmin_lag1 + tmax_lag2 + pr_lag1 +
     (1 | adm_1_name/IBGE_code),
@@ -722,24 +889,22 @@ library(broom.mixed)
 library(dplyr)
 
 priv_pub_estimates <- bind_rows(
-  tidy(priv_pub_lag1_lmer, effects = "fixed") %>% 
+  tidy(priv_pub_lag1_lmer, effects = "fixed",conf.int = T, p.value = T) %>% 
     filter(term == "priv_pub_lag1_million"),
   
-  tidy(priv_pub_lag2_lmer, effects = "fixed") %>% 
+  tidy(priv_pub_lag2_lmer, effects = "fixed",conf.int = T, p.value = T) %>% 
     filter(term == "priv_pub_lag2_million"),
   
-  tidy(priv_pub_lag3_lmer, effects = "fixed") %>% 
+  tidy(priv_pub_lag3_lmer, effects = "fixed",conf.int = T, p.value = T) %>% 
     filter(term == "priv_pub_lag3_million")
 )
-
 priv_pub_estimates
-confint(priv_pub_lag1_lmer, parm = "priv_pub_lag1_million")
-confint(priv_pub_lag2_lmer, parm = "priv_pub_lag2_million")
-confint(priv_pub_lag3_lmer, parm = "priv_pub_lag3_million")
+
+
 
 #######---public total damage---######
 
-pub_total_lag1_lmer <- lmer(
+pub_total_lag1_lmer <- lmerTest::lmer(
   sd_anomaly ~ pub_total_lag1_million +
     tmin_lag1 + tmax_lag2 + pr_lag1 +
     (1 | adm_1_name/IBGE_code),
@@ -747,7 +912,7 @@ pub_total_lag1_lmer <- lmer(
   REML = FALSE
 )
 
-pub_total_lag2_lmer <- lmer(
+pub_total_lag2_lmer <- lmerTest::lmer(
   sd_anomaly ~ pub_total_lag2_million +
     tmin_lag1 + tmax_lag2 + pr_lag1 +
     (1 | adm_1_name/IBGE_code),
@@ -755,7 +920,7 @@ pub_total_lag2_lmer <- lmer(
   REML = FALSE
 )
 
-pub_total_lag3_lmer <- lmer(
+pub_total_lag3_lmer <- lmerTest::lmer(
   sd_anomaly ~ pub_total_lag3_million +
     tmin_lag1 + tmax_lag2 + pr_lag1 +
     (1 | adm_1_name/IBGE_code),
@@ -770,20 +935,20 @@ AIC(
 )
 
 pub_total_estimates <- bind_rows(
-  tidy(pub_total_lag1_lmer, effects = "fixed") %>% 
+  tidy(pub_total_lag1_lmer, effects = "fixed",conf.int = T, p.value = T) %>% 
     filter(term == "pub_total_lag1_million"),
   
-  tidy(pub_total_lag2_lmer, effects = "fixed") %>% 
+  tidy(pub_total_lag2_lmer, effects = "fixed",conf.int = T, p.value = T) %>% 
     filter(term == "pub_total_lag2_million"),
   
-  tidy(pub_total_lag3_lmer, effects = "fixed") %>% 
+  tidy(pub_total_lag3_lmer, effects = "fixed",conf.int = T, p.value = T) %>% 
     filter(term == "pub_total_lag3_million")
 )
 
 pub_total_estimates
 
 #######---homeless---######
-homeless_lag1_lmer <- lmer(
+homeless_lag1_lmer <- lmerTest::lmer(
   sd_anomaly ~ dh_homeless_lag1 +
     tmin_lag1 + tmax_lag2 + pr_lag1 +
     (1 | adm_1_name/IBGE_code),
@@ -791,7 +956,7 @@ homeless_lag1_lmer <- lmer(
   REML = FALSE
 )
 
-homeless_lag2_lmer <- lmer(
+homeless_lag2_lmer <- lmerTest::lmer(
   sd_anomaly ~ dh_homeless_lag2 +
     tmin_lag1 + tmax_lag2 + pr_lag1 +
     (1 | adm_1_name/IBGE_code),
@@ -799,7 +964,7 @@ homeless_lag2_lmer <- lmer(
   REML = FALSE
 )
 
-homeless_lag3_lmer <- lmer(
+homeless_lag3_lmer <- lmerTest::lmer(
   sd_anomaly ~ dh_homeless_lag3 +
     tmin_lag1 + tmax_lag2 + pr_lag1 +
     (1 | adm_1_name/IBGE_code),
@@ -814,17 +979,15 @@ AIC(
 )
 
 homeless_estimates <- bind_rows(
-  tidy(homeless_lag1_lmer, effects = "fixed") %>%
+  tidy(homeless_lag1_lmer, effects = "fixed",conf.int = T, p.value = T) %>%
     filter(term == "dh_homeless_lag1"),
   
-  tidy(homeless_lag2_lmer, effects = "fixed") %>%
+  tidy(homeless_lag2_lmer, effects = "fixed",conf.int = T, p.value = T) %>%
     filter(term == "dh_homeless_lag2"),
   
-  tidy(homeless_lag3_lmer, effects = "fixed") %>%
+  tidy(homeless_lag3_lmer, effects = "fixed",conf.int = T, p.value = T) %>%
     filter(term == "dh_homeless_lag3")
 )
 
 homeless_estimates
-confint(homeless_lag1_lmer, parm = "dh_homeless_lag1")
-confint(homeless_lag2_lmer, parm = "dh_homeless_lag2")
-confint(homeless_lag3_lmer, parm = "dh_homeless_lag3")
+
