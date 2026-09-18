@@ -192,7 +192,7 @@ ggplot(outbreaks_by_month, aes(x = season_month, y = pct_outbreak)) +
   theme(legend.position = "bottom")
 
 # Combined graph of pct outbreak and mean case number in outbreak
-range_cases <- range(outbreaks_by_month$mean_cases_outbreak, na.rm = TRUE)
+range_cases <- range(outbreaks_by_month$mean_dengue, na.rm = TRUE)
 range_pct   <- range(outbreaks_by_month$pct_outbreak, na.rm = TRUE)
 
 scale_factor <- diff(range_cases) / diff(range_pct)
@@ -206,7 +206,7 @@ line_col <- "#D95F02"   # orange
 
 ggplot(outbreaks_by_month,
        aes(x = season_month)) +
-  geom_col(aes(y = mean_cases_outbreak),
+  geom_col(aes(y = mean_dengue),
            fill = bar_col,
            alpha = 0.8) +
   geom_line(aes(y = pct_outbreak * scale_factor + offset),
@@ -214,7 +214,7 @@ ggplot(outbreaks_by_month,
             linewidth = 0.8,
             group = 1) +
   scale_y_continuous(
-    name = "Mean # of Dengue Cases in an Outbreak Month",
+    name = "Mean # of Dengue Cases per Month",
     sec.axis = sec_axis(
       ~ (. - offset) / scale_factor,
       name = "% of Municipality-Months in Outbreak"
@@ -227,7 +227,7 @@ ggplot(outbreaks_by_month,
   ) +
   labs(
     title = "Seasonal Distribution of Dengue Outbreaks 2006-2023",
-    subtitle = "Bars = mean number of dengue cases in outbreak | Line = % of municipality-months in outbreak",
+    subtitle = "Bars = mean number of dengue cases per month | Line = % of municipality-months in outbreak",
     x = "Epidemiological month (October = 1)"
   ) +
   theme_bw(base_size = 11) +

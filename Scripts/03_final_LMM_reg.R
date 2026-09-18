@@ -12,7 +12,7 @@
 #' Timeline: 
 #'   2026-08-03
 
-regression_data <-read_csv("00_Data/regression_data_v4.csv")
+
 install.packages("broom.mixed")
 install.packages("lme4")
 install.packages("performance")
@@ -25,6 +25,7 @@ library(dplyr)
 library(tidyr)
 library(lmtest) 
 library(broom.mixed)
+regression_data <-read_csv("00_Data/regression_data_v4.csv")
 #### ----prepare data ----
 cat("Rows available:", nrow(regression_data), "\n")
 cat("Outbreak months:", sum(regression_data$outbreak), "\n")
@@ -64,10 +65,7 @@ regression_data_fil <- regression_data_sum |>
 #filter to municipalities in the south and southeastern regions of brazil
 sort(unique(regression_data$adm_1_name))
 south_southeast_states <- c(
-  # South
-  "PARANA",
-  "SANTA CATARINA",
-  "RIO GRANDE DO SUL",
+
   # Southeast
   "SAO PAULO",
   "RIO DE JANEIRO",
@@ -338,7 +336,7 @@ m_tmin_lag3 <- lmer(
   REML = FALSE
 )
 
-AIC(m_tmin_lag1, m_tmin_lag2, m_tmin_lag3)
+AIC(m0_lmer, m_tmin_lag1, m_tmin_lag2, m_tmin_lag3)
 tidy(m_tmin_lag1, effects = "fixed")
 tidy(m_tmin_lag2, effects = "fixed")
 tidy(m_tmin_lag3, effects = "fixed")
@@ -412,7 +410,7 @@ m_tmax_lag3 <- lmer(
   REML = FALSE
 )
 
-AIC(m_tmax_lag1, m_tmax_lag2, m_tmax_lag3)
+AIC(m0_lmer, m_tmax_lag1, m_tmax_lag2, m_tmax_lag3)
 #            df     AIC
 #m_tmax_lag1  5 4665941
 #m_tmax_lag2  5 4665897  ##the best
@@ -478,7 +476,7 @@ m_pr_lag3 <- lmer(
   REML = FALSE
 )
 
-AIC(m_pr_lag1, m_pr_lag2, m_pr_lag3)
+AIC(m0_lmer, m_pr_lag1, m_pr_lag2, m_pr_lag3)
 #          df     AIC
 #m_pr_lag1  5 4666034 ##best
 #m_pr_lag2  5 4666038
@@ -503,7 +501,7 @@ broom.mixed::tidy(final_clim,  exponentiate = FALSE,
 AIC(final_clim)
 check_collinearity(final_clim)
 log_model("reg_final_clim", "just tmin_lag1, tmax_lag2, pr_lag1", final_clim, m0_lmer, kept = T)
-
+summary(final_clim)
 ###---Testing Disaster Variables----####
 d1_lmer <- lmer(sd_anomaly ~ n_inunda_lag1
              + tmin_lag1  + tmax_lag2 + pr_lag1
@@ -589,9 +587,9 @@ bind_rows(
   tidy(d5, effects = "fixed",conf.int = T, p.value = T) |> dplyr::filter(term == "n_inunda_lag5")
 )
 
-broom.mixed::tidy(d5,effects = "fixed",  exponentiate = FALSE,
+broom.mixed::tidy(d5, effects = "fixed", exponentiate = FALSE,
                   conf.int = T, p.value = T)
-
+summary(d5)
 ###stepwise addition
 base_lmer <- lmer(
   sd_anomaly ~ tmin_lag1 + tmax_lag2 + pr_lag1 +
@@ -656,6 +654,7 @@ anova(inunda_lag12_lmer, inunda_lag123_lmer)
 anova(inunda_lag123_lmer, inunda_lag1234_lmer)
 anova(inunda_lag1234_lmer, inunda_lag12345_lmer)
 
+summary(inunda_lag12345_lmer)
 #######--alaga lags--####
 
 alaga1_lmer <- lmerTest::lmer(

@@ -162,3 +162,4 @@ summary(climate_monthly$pr_sum)
 
 #save merged climate/outbreak data
 write_csv(adm2_outbreak_climate, "00_Data/adm2_outbreak_climate.csv")
+adm2_outbreak_climate <- read_csv("00_Data/adm2_outbreak_climate.csv")

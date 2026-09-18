@@ -312,7 +312,7 @@ plot_outbreak_map("pct_outbreak", "% months as outbreak")
 plot_disaster_map("inunda", title_label = "Floods")
 plot_disaster_map("seca",   title_label = "Drought")
 plot_disaster_map("alaga",  title_label = "Urban Floods")
-plot_disaster_map("massa",  title_label = "Mass Movement")
+
 
 
 # Save
@@ -994,3 +994,255 @@ ggsave("Submission/map_outbreak_proportion_by_state.png",
 ggsave("Submission/bivariate_map_combined_reg.png",
        final_figure,
        width = 12, height = 6, dpi = 150)
+
+
+
+
+####---combined updated disaster maps----#####
+
+# Function to get disaster totals by state for a specific typology
+get_disaster_map_data <- function(search_term) {
+  get_disaster_totals_reg(search_term) |>
+    right_join(
+      states_sf |> select(abbrev_state, geometry),
+      by = c("sigla_uf" = "abbrev_state")
+    ) |>
+    mutate(n_events = replace_na(n_events, 0))
+}
+
+# Build map data for each typology
+flood_data      <- get_disaster_map_data("inunda")
+urban_flood_data <- get_disaster_map_data("alaga")
+drought_data    <- get_disaster_map_data("seca")
+
+#single disaster map
+plot_disaster_map_single <- function(map_data,
+                                     title_label,
+                                     fill_high = "#08306b") {
+  
+  ggplot(map_data) +
+    geom_sf(aes(fill = n_events), colour = "white", linewidth = 0.3) +
+    scale_fill_gradient(
+      low      = "#eff3ff",
+      high     = fill_high,
+      na.value = "grey80",
+      name     = "Events",
+      labels   = scales::comma
+    ) +
+    geom_sf_text(
+      data = states_sf,
+      aes(label = abbrev_state),
+      size   = 2,
+      colour = "grey20"
+    ) +
+    annotation_scale(
+      location   = "bl",
+      width_hint = 0.25,
+      pad_x      = unit(0.3, "cm"),
+      pad_y      = unit(0.3, "cm"),
+      text_cex   = 0.7,
+      line_width = 0.5
+    ) +
+    annotation_north_arrow(
+      location    = "bl",
+      which_north = "true",
+      style       = north_arrow_fancy_orienteering,
+      pad_x       = unit(0.4, "cm"),
+      pad_y       = unit(1.8, "cm"),
+      height      = unit(1, "cm"),
+      width       = unit(1, "cm")
+    ) +
+    labs(title = title_label) +
+    theme_void(base_size = 11) +
+    theme(
+      plot.title      = element_text(face = "bold", size = 11),
+      legend.position = "right",
+      plot.margin     = margin(5, 5, 5, 5)
+    )
+}
+
+##build panes for combined map
+p_flood_single <- plot_disaster_map_single(
+  st_as_sf(flood_data),
+  title_label = "Flood events (Inundações)",
+  fill_high   = "#08306b"
+)
+
+p_urban_flood_single <- plot_disaster_map_single(
+  st_as_sf(urban_flood_data),
+  title_label = "Urban flood events (Alagamentos)",
+  fill_high   = "#08306b"
+)
+
+p_drought_single <- plot_disaster_map_single(
+  st_as_sf(drought_data),
+  title_label = "Drought events (Estiagem e Seca)",
+  fill_high   = "#800026"   # different colour to distinguish drought
+)
+
+#combine panes with labels
+panel_label <- function(label) {
+  ggplot() +
+    annotate("text", x = 0.5, y = 0.5, label = label,
+             fontface = "bold", size = 5) +
+    theme_void() +
+    theme(plot.margin = margin(0, 0, 0, 0))
+}
+
+panel_a <- cowplot::plot_grid(
+  panel_label("A"), p_flood_single,
+  ncol = 1, rel_heights = c(0.06, 1)
+)
+
+panel_b <- cowplot::plot_grid(
+  panel_label("B"), p_urban_flood_single,
+  ncol = 1, rel_heights = c(0.06, 1)
+)
+
+panel_c <- cowplot::plot_grid(
+  panel_label("C"), p_drought_single,
+  ncol = 1, rel_heights = c(0.06, 1)
+)
+
+combined_disaster_maps <- cowplot::plot_grid(
+  panel_a, panel_b, panel_c,
+  ncol  = 3,
+  align = "hv"
+)
+
+combined_disaster_maps
+
+# SAVE
+
+ggsave(
+  "Submission/map_disaster_types_combined.png",
+  combined_disaster_maps,
+  width  = 16,
+  height = 6,
+  dpi    = 150
+)
+
+cat("Saved: outputs/map_disaster_types_combined.png\n")
+
+
+#####DISASTER INCIDENCE BY YEAR: floods, urban floods, drought####
+
+# Build annual counts for each typology from disasters_plot
+disaster_annual <- bind_rows(
+  disasters_plot |>
+    filter(
+      str_detect(tolower(descricao_tipologia), "inunda"),
+      date >= disaster_date_min,
+      date <= disaster_date_max
+    ) |>
+    mutate(year = year(date), type = "Floods (Inundações)"),
+  
+  disasters_plot |>
+    filter(
+      str_detect(tolower(descricao_tipologia), "alaga"),
+      date >= disaster_date_min,
+      date <= disaster_date_max
+    ) |>
+    mutate(year = year(date), type = "Urban Floods (Alagamentos)"),
+  
+  disasters_plot |>
+    filter(
+      str_detect(tolower(descricao_tipologia), "seca"),
+      date >= disaster_date_min,
+      date <= disaster_date_max
+    ) |>
+    mutate(year = year(date), type = "Drought (Estiagem e Seca)")
+) |>
+  group_by(year, type) |>
+  summarise(n_events = n(), .groups = "drop") |>
+  mutate(type = factor(type, levels = c(
+    "Floods (Inundações)",
+    "Urban Floods (Alagamentos)",
+    "Drought (Estiagem e Seca)"
+  )))
+
+####combined graph####
+p_disaster_annual <- ggplot(disaster_annual,
+                            aes(x = year, y = n_events,
+                                colour = type, group = type)) +
+  geom_line(linewidth = 0.8) +
+  geom_point(size = 2) +
+  scale_colour_manual(
+    values = c(
+      "Floods (Inundações)"         = "#2166ac",
+      "Urban Floods (Alagamentos)"  = "#74add1",
+      "Drought (Estiagem e Seca)"   = "#d73027"
+    ),
+    name = "Disaster type"
+  ) +
+  scale_x_continuous(breaks = 2006:2023) +
+  scale_y_continuous(labels = scales::comma) +
+  labs(
+    title    = "Annual disaster event frequency by type, Brazil (2006–2023)",
+    subtitle = "Each point represents the total number of registered events in that year",
+    x        = NULL,
+    y        = "Number of disaster events"
+  ) +
+  theme_bw(base_size = 11) +
+  theme(
+    axis.text.x      = element_text(angle = 45, hjust = 1),
+    panel.grid.minor = element_blank(),
+    legend.position  = "bottom",
+    legend.title     = element_text(face = "bold")
+  )
+
+p_disaster_annual
+
+###other version
+p_disaster_facet <- ggplot(disaster_annual,
+                           aes(x = year, y = n_events, fill = type)) +
+  geom_col(alpha = 0.85, show.legend = FALSE) +
+  scale_fill_manual(values = c(
+    "Floods (Inundações)"         = "#2166ac",
+    "Urban Floods (Alagamentos)"  = "#74add1",
+    "Drought (Estiagem e Seca)"   = "#d73027"
+  )) +
+  scale_x_continuous(breaks = seq(2006, 2023, by = 2)) +
+  scale_y_continuous(labels = scales::comma) +
+  facet_wrap(~ type, ncol = 1, scales = "free_y") +
+  labs(
+    title    = "Annual disaster event frequency by type, Brazil (2006–2023)",
+    x        = NULL,
+    y        = "Number of disaster events"
+  ) +
+  theme_bw(base_size = 11) +
+  theme(
+    axis.text.x      = element_text(angle = 45, hjust = 1),
+    panel.grid.minor = element_blank(),
+    strip.text       = element_text(face = "bold")
+  )
+
+p_disaster_facet
+
+##combined map and graph
+combined_full <- cowplot::plot_grid(
+  combined_disaster_maps,
+  p_disaster_annual,
+  ncol        = 1,
+  rel_heights = c(1, 0.6),
+  labels      = c("", "D"),
+  label_size  = 13,
+  label_fontface = "bold"
+)
+
+combined_full
+
+# =============================================================================
+# SAVE
+# =============================================================================
+
+ggsave("outputs/plot_disaster_annual.png",
+       p_disaster_annual, width = 10, height = 5, dpi = 150)
+
+ggsave("outputs/plot_disaster_facet.png",
+       p_disaster_facet, width = 8, height = 8, dpi = 150)
+
+ggsave("outputs/figure_disaster_maps_timeseries.png",
+       combined_full, width = 16, height = 10, dpi = 150)
+
+cat("Saved all disaster figures to outputs/\n")
